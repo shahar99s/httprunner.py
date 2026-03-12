@@ -102,7 +102,7 @@ def run_step_request(runner: HttpRunner, step: TStep) -> StepResult:
     request_headers = {
         key: request_headers[key] for key in request_headers if not key.startswith(":")
     }
-    if runner.config.add_request_id:
+    if runner.get_config().add_request_id:
         request_headers[
             "HRUN-Request-ID"
         ] = f"HRUN-{runner.case_id}-{str(int(time.time() * 1000))[-6:]}"
