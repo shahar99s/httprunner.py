@@ -169,6 +169,43 @@ def omit_long_data(body, omit_len=512):
     return omitted_body + appendix_str
 
 
+def format_response_body_for_log(
+    body, content_type: str = "", content_disposition: str = "", omit_len: int = 512
+):
+    """format response body for logs without dumping large binary payloads"""
+    lower_content_type = (content_type or "").lower()
+    lower_content_disposition = (content_disposition or "").lower()
+
+    if isinstance(body, (dict, list)):
+        return body
+
+    if isinstance(body, str):
+        return omit_long_data(body, omit_len)
+
+    if isinstance(body, bytes):
+        is_text_like = lower_content_type.startswith("text/") or any(
+            marker in lower_content_type
+            for marker in [
+                "json",
+                "xml",
+                "javascript",
+                "x-www-form-urlencoded",
+                "html",
+            ]
+        )
+        is_attachment = "attachment" in lower_content_disposition
+
+        if is_text_like and not is_attachment:
+            try:
+                return omit_long_data(body.decode("utf-8"), omit_len)
+            except UnicodeDecodeError:
+                pass
+
+        return f"<binary content omitted: {len(body)} bytes, content-type={content_type or 'unknown'}>"
+
+    return body
+
+
 def sort_dict_by_custom_order(raw_dict: Dict, custom_order: List):
     def get_index_from_list(lst: List, item: Any):
         try:

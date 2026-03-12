@@ -37,12 +37,49 @@ INFINITY = float("inf")
 FLOAT_REPR = repr
 
 
+def decode_base64_string_if_possible(input_string):
+    """
+    Try to decode a string as base64. If it fails, just return the input string.
+    """
+    if not isinstance(input_string, str) or not input_string:
+        return input_string
+
+    # Remove whitespace and check if the string is a valid base64 string
+    stripped_string = input_string.strip()
+    if len(stripped_string) % 4 != 0 or not re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", stripped_string):
+        return input_string
+
+    try:
+        decoded_bytes = base64.b64decode(stripped_string, validate=True)
+    except Exception:
+        return input_string
+
+    if not decoded_bytes:
+        return input_string
+
+    # Normalize the base64 string by removing trailing "="
+    normalized_encoded = base64.b64encode(decoded_bytes).decode("ascii").rstrip("=")
+    if normalized_encoded != stripped_string.rstrip("="):
+        return input_string
+
+    return decoded_bytes
+
+
+def safe_join_json_chunks(chunks, skip_nonutf8_value=False):
+    if not skip_nonutf8_value:
+        return "".join(chunks)
+
+    tmp_chunks = []
+    for chunk in chunks:
+        try:
+            tmp_chunks.append(unicode_2_utf8_keep_native(chunk))
+        except Exception:
+            logging.debug(traceback.format_exc())
+
+    return "".join(tmp_chunks)
+
+
 def istext(s_input):
-    """
-    既然我们要判断这串内容是不是可以做为Json的value,那为什么不放下试试呢？
-    :param s_input:
-    :return:
-    """
     return not isinstance(s_input, bytes)
 
 
@@ -207,13 +244,15 @@ class ThriftJSONDecoder(json.JSONDecoder):
                 ret = None
         elif ttype == TType.STRING:
             if isinstance(val, str):
-                ret = val.encode("utf8")
+                maybe_decoded = decode_base64_string_if_possible(val)
+                if isinstance(maybe_decoded, bytes):
+                    ret = maybe_decoded
+                else:
+                    ret = val.encode("utf8")
             elif val is None:
                 ret = None
             else:
                 ret = str(val)
-            # 判断string字段是否是base64编码后的string, 如果是则此处需要对该string字段进行b64decode, 还原成原本的字符串
-            # todo : 留待实现
 
         elif ttype == TType.DOUBLE:
             if val is not None:
@@ -307,19 +346,7 @@ class MyJSONEncoder(json.JSONEncoder):
         chunks = self.iterencode(o, _one_shot=True)
         if not isinstance(chunks, (list, tuple)):
             chunks = list(chunks)
-        # add by braver
-        # todo: fix 'utf8' codec can't decode byte 0x91 in position 3: invalid start byte"
-        if self.skip_nonutf8_value:  # 缺省为false
-            tmp_chunks = []
-            for chunk in chunks:
-                try:
-                    tmp_chunks.append(unicode_2_utf8_keep_native(chunk))
-                except Exception as err:
-                    logging.debug(traceback.format_exc())
-            return "".join(tmp_chunks)
-
-        # 保留老的逻辑, /usr/lib/python2.7/package/json/__init__.py dumps接口
-        return "".join(chunks)
+        return safe_join_json_chunks(chunks, self.skip_nonutf8_value)
 
 
 class ThriftJSONEncoder(json.JSONEncoder):
@@ -377,19 +404,7 @@ class ThriftJSONEncoder(json.JSONEncoder):
         chunks = self.iterencode(o, _one_shot=True)
         if not isinstance(chunks, (list, tuple)):
             chunks = list(chunks)
-        # add by braver
-        # todo: fix 'utf8' codec can't decode byte 0x91 in position 3: invalid start byte"
-        if self.skip_nonutf8_value:  # 缺省为false
-            tmp_chunks = []
-            for chunk in chunks:
-                try:
-                    tmp_chunks.append(unicode_2_utf8_keep_native(chunk))
-                except Exception as err:
-                    logging.debug(traceback.format_exc())
-            return "".join(tmp_chunks)
-
-        # 保留老的逻辑, /usr/lib/python2.7/package/json/__init__.py dumps接口
-        return "".join(chunks)
+        return safe_join_json_chunks(chunks, self.skip_nonutf8_value)
 
     def default(self, o):
         if isinstance(o, bytes):

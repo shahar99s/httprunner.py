@@ -71,3 +71,12 @@ class TestHttpSession(unittest.TestCase):
         self.assertEqual(address.server_port, 0)
         self.assertEqual(address.client_ip, "N/A")
         self.assertEqual(address.client_port, 0)
+
+    def test_update_last_req_resp_record_when_history_empty(self):
+        response = self.session.request("get", "https://postman-echo.com/get")
+        self.session.data.req_resps = []
+
+        self.session.update_last_req_resp_record(response)
+
+        self.assertEqual(len(self.session.data.req_resps), 1)
+        self.assertEqual(self.session.data.req_resps[0].response.status_code, 200)

@@ -54,6 +54,19 @@ try:
     import filetype
     from requests_toolbelt import MultipartEncoder
 
+    class ManagedMultipartEncoder(MultipartEncoder):
+        def __init__(self, *args, file_handlers=None, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._file_handlers = file_handlers or []
+
+        def close(self):
+            for file_handler in self._file_handlers:
+                try:
+                    file_handler.close()
+                except Exception as ex:
+                    logger.debug(f"failed to close upload file handler: {ex}")
+            self._file_handlers.clear()
+
     UPLOAD_READY = True
 except ModuleNotFoundError:
     UPLOAD_READY = False
@@ -137,6 +150,7 @@ def multipart_encoder(**kwargs):
 
     ensure_upload_ready()
     fields_dict = {}
+    file_handlers = []
     for key, value in kwargs.items():
         if os.path.isabs(value):
             # value is absolute file path
@@ -155,13 +169,13 @@ def multipart_encoder(**kwargs):
             # value is file path to upload
             filename = os.path.basename(_file_path)
             mime_type = get_filetype(_file_path)
-            # TODO: fix ResourceWarning for unclosed file
             file_handler = open(_file_path, "rb")
+            file_handlers.append(file_handler)
             fields_dict[key] = (filename, file_handler, mime_type)
         else:
             fields_dict[key] = value
 
-    return MultipartEncoder(fields=fields_dict)
+    return ManagedMultipartEncoder(fields=fields_dict, file_handlers=file_handlers)
 
 
 def multipart_content_type(m_encoder) -> Text:

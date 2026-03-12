@@ -234,13 +234,22 @@ def get_mapping_variable(
         exceptions.VariableNotFound: variable is not found.
 
     """
-    # TODO: get variable from debugtalk module and environ
-    try:
+    if variable_name in variables_mapping:
         return variables_mapping[variable_name]
-    except KeyError:
-        raise exceptions.VariableNotFound(
-            f"{variable_name} not found in {variables_mapping}"
-        )
+
+    project_meta = loader.project_meta
+    if project_meta:
+        if variable_name in project_meta.variables:
+            return project_meta.variables[variable_name]
+        if variable_name in project_meta.env:
+            return project_meta.env[variable_name]
+
+    if variable_name in os.environ:
+        return os.environ[variable_name]
+
+    raise exceptions.VariableNotFound(
+        f"{variable_name} not found in {variables_mapping}"
+    )
 
 
 def get_mapping_function(

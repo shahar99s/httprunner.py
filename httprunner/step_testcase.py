@@ -18,10 +18,9 @@ def run_step_testcase(runner: HttpRunner, step: TStep) -> StepResult:
     if step.setup_hooks:
         call_hooks(runner, step.setup_hooks, step_variables, "setup testcase")
 
-    # TODO: override testcase with current step name/variables/export
-
     # step.testcase is a referenced testcase, e.g. RequestWithFunctions
     ref_case_runner = step.testcase()
+    ref_case_runner.config._Config__name = step.name
     ref_case_runner.set_referenced().with_session(runner.session).with_case_id(
         runner.case_id
     ).with_variables(step_variables).with_export(step_export).test_start()

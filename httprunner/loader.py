@@ -236,6 +236,31 @@ def load_module_functions(module) -> Dict[Text, Callable]:
     return module_functions
 
 
+def load_module_variables(module) -> Dict[Text, object]:
+    """load python module variables.
+
+    Args:
+        module: python module
+
+    Returns:
+        dict: non-callable module-level variables
+    """
+    module_variables = {}
+
+    for name, item in vars(module).items():
+        if name.startswith("__"):
+            continue
+        if isinstance(item, types.FunctionType):
+            continue
+        if isinstance(item, types.ModuleType):
+            continue
+        if isinstance(item, type):
+            continue
+        module_variables[name] = item
+
+    return module_variables
+
+
 def load_builtin_functions() -> Dict[Text, Callable]:
     """load builtin module functions"""
     return load_module_functions(builtin)
@@ -336,6 +361,21 @@ def locate_project_root_directory(test_path: Text) -> Tuple[Text, Text]:
     return debugtalk_path, project_root_directory
 
 
+def load_debugtalk_module() -> types.ModuleType:
+    """load project debugtalk.py module.
+
+    Returns:
+        module: imported debugtalk module
+    """
+    try:
+        imported_module = importlib.import_module("debugtalk")
+    except Exception as ex:
+        logger.error(f"error occurred in debugtalk.py: {ex}")
+        sys.exit(1)
+
+    return importlib.reload(imported_module)
+
+
 def load_debugtalk_functions() -> Dict[Text, Callable]:
     """load project debugtalk.py module functions
         debugtalk.py should be located in project root directory.
@@ -348,15 +388,7 @@ def load_debugtalk_functions() -> Dict[Text, Callable]:
             }
 
     """
-    # load debugtalk.py module
-    try:
-        imported_module = importlib.import_module("debugtalk")
-    except Exception as ex:
-        logger.error(f"error occurred in debugtalk.py: {ex}")
-        sys.exit(1)
-
-    # reload to refresh previously loaded module
-    imported_module = importlib.reload(imported_module)
+    imported_module = load_debugtalk_module()
     return load_module_functions(imported_module)
 
 
@@ -399,14 +431,17 @@ def load_project_meta(test_path: Text, reload: bool = False) -> ProjectMeta:
         project_meta.dot_env_path = dot_env_path
 
     if debugtalk_path:
-        # load debugtalk.py functions
-        debugtalk_functions = load_debugtalk_functions()
+        debugtalk_module = load_debugtalk_module()
+        debugtalk_functions = load_module_functions(debugtalk_module)
+        debugtalk_variables = load_module_variables(debugtalk_module)
     else:
         debugtalk_functions = {}
+        debugtalk_variables = {}
 
     # locate project RootDir and load debugtalk.py functions
     project_meta.RootDir = project_root_directory
     project_meta.functions = debugtalk_functions
+    project_meta.variables = debugtalk_variables
     project_meta.debugtalk_path = debugtalk_path
 
     return project_meta

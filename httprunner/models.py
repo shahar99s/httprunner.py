@@ -176,6 +176,7 @@ class ProjectMeta(BaseModel):
     debugtalk_path: Text = ""  # debugtalk.py file path
     dot_env_path: Text = ""  # .env file path
     functions: FunctionsMapping = {}  # functions defined in debugtalk.py
+    variables: VariablesMapping = {}  # variables defined in debugtalk.py
     env: Env = {}
     RootDir: Text = (
         os.getcwd()

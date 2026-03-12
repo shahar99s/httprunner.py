@@ -1,9 +1,20 @@
+import json
+import os
 import uuid
 from typing import List
 
 import pytest
 from httprunner import Config, Step
 from loguru import logger
+
+
+def publish_summary_artifact(file_name, payload):
+    artifacts_dir = os.path.join(os.getcwd(), "logs", "pytest-summaries")
+    os.makedirs(artifacts_dir, exist_ok=True)
+    artifact_path = os.path.join(artifacts_dir, file_name)
+    with open(artifact_path, "w", encoding="utf-8") as artifact_file:
+        json.dump(payload, artifact_file, ensure_ascii=False, indent=2, default=str)
+    logger.debug(f"published summary artifact: {artifact_path}")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -25,8 +36,13 @@ def session_fixture(request):
 
     logger.debug("teardown task fixture")
 
-    # teardown task
-    # TODO: upload task summary
+    publish_summary_artifact(
+        "task-summary.json",
+        {
+            "total_testcases": total_testcases_num,
+            "testcases": testcases,
+        },
+    )
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -58,4 +74,7 @@ def testcase_fixture(request):
     summary = request.instance.get_summary()
     logger.debug(f"testcase result summary: {summary}")
 
-    # TODO: upload testcase summary
+    publish_summary_artifact(
+        f"{request.node.name}-summary.json",
+        summary.dict(),
+    )

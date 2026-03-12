@@ -1,8 +1,10 @@
 import os
+import sys
+import tempfile
 import time
 import unittest
 
-from httprunner import parser
+from httprunner import loader, parser
 from httprunner.exceptions import FunctionNotFound, VariableNotFound
 from httprunner.loader import load_project_meta
 
@@ -554,6 +556,7 @@ class TestParserBasic(unittest.TestCase):
             },
             parsed_params,
         )
+
         self.assertIn(
             {
                 "username": "test2",
@@ -572,3 +575,27 @@ class TestParserBasic(unittest.TestCase):
             },
             parsed_params,
         )
+
+    def test_get_mapping_variable_from_debugtalk_and_env(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            debugtalk_path = os.path.join(temp_dir, "debugtalk.py")
+            env_path = os.path.join(temp_dir, ".env")
+
+            with open(debugtalk_path, "w", encoding="utf-8") as debugtalk_file:
+                debugtalk_file.write(
+                    "DEBUG_VALUE = 'from_debugtalk'\n"
+                    "def helper():\n"
+                    "    return 'helper'\n"
+                )
+
+            with open(env_path, "w", encoding="utf-8") as env_file:
+                env_file.write("DOT_ENV_VALUE=from_dot_env\n")
+
+            sys.modules.pop("debugtalk", None)
+            load_project_meta(temp_dir, reload=True)
+
+            self.assertEqual(parser.parse_data("$DEBUG_VALUE", {}), "from_debugtalk")
+            self.assertEqual(parser.parse_data("$DOT_ENV_VALUE", {}), "from_dot_env")
+
+        loader.project_meta = None
+        sys.modules.pop("debugtalk", None)

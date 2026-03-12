@@ -9,17 +9,34 @@ from httprunner.utils import HTTP_BIN_URL
 
 class TestResponse(unittest.TestCase):
     def setUp(self) -> None:
-        resp = requests.post(
-            f"{HTTP_BIN_URL}/anything",
-            json={
-                "locations": [
-                    {"name": "Seattle", "state": "WA"},
-                    {"name": "New York", "state": "NY"},
-                    {"name": "Bellevue", "state": "WA"},
-                    {"name": "Olympia", "state": "WA"},
-                ]
-            },
-        )
+        # create a dummy response-like object to avoid network calls
+        class DummyCookies(dict):
+            def get_dict(self):
+                return dict(self)
+
+        class DummyResp:
+            def __init__(self):
+                self.status_code = 200
+                self.headers = {}
+                self._json = {
+                    "locations": [
+                        {"name": "Seattle", "state": "WA"},
+                        {"name": "New York", "state": "NY"},
+                        {"name": "Bellevue", "state": "WA"},
+                        {"name": "Olympia", "state": "WA"},
+                    ]
+                }
+                self.cookies = DummyCookies()
+                self.content = b""
+
+            def json(self):
+                return self._json
+
+            @property
+            def text(self):
+                return str(self._json)
+
+        resp = DummyResp()
         parser = Parser(
             functions_mapping={"get_name": lambda: "name", "get_num": lambda x: x}
         )

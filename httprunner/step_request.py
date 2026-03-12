@@ -143,10 +143,21 @@ def run_step_request(runner: HttpRunner, step: TStep) -> StepResult:
     response_print += f"status_code: {resp.status_code}\n"
     response_print += f"headers: {pretty_format(resp.headers)}\n"
 
+    response_headers = dict(resp.headers)
+    content_type = response_headers.get("Content-Type", "")
+    content_disposition = response_headers.get("Content-Disposition", "")
+
     try:
         resp_body = resp.json()
     except (requests.exceptions.JSONDecodeError, json.decoder.JSONDecodeError):
-        resp_body = resp.content
+        if "attachment" in content_disposition.lower():
+            resp_body = utils.format_response_body_for_log(
+                resp.content, content_type, content_disposition
+            )
+        else:
+            resp_body = utils.format_response_body_for_log(
+                resp.text, content_type, content_disposition
+            )
 
     response_print += f"body: {pretty_format(resp_body)}\n"
     logger.debug(response_print)
@@ -356,14 +367,6 @@ class StepRequestExtraction(IStep):
     def with_jmespath(self, jmes_path: Text, var_name: Text) -> "StepRequestExtraction":
         self.__step.extract[var_name] = jmes_path
         return self
-
-    # def with_regex(self):
-    #     # TODO: extract response html with regex
-    #     pass
-    #
-    # def with_jsonpath(self):
-    #     # TODO: extract response json with jsonpath
-    #     pass
 
     def validate(self) -> StepRequestValidation:
         return StepRequestValidation(self.__step)

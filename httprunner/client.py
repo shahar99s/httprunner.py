@@ -14,7 +14,7 @@ from requests.exceptions import (
 
 from httprunner.models import RequestData, ResponseData
 from httprunner.models import SessionData, ReqRespData
-from httprunner.utils import lower_dict_keys, omit_long_data
+from httprunner.utils import format_response_body_for_log, lower_dict_keys
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -77,17 +77,22 @@ def get_req_resp_record(resp_obj: Response) -> ReqRespData:
     lower_resp_headers = lower_dict_keys(resp_headers)
     content_type = lower_resp_headers.get("content-type", "")
 
-    if "image" in content_type:
-        # response is image type, record bytes content only
-        response_body = resp_obj.content
-    else:
-        try:
-            # try to record json data
-            response_body = resp_obj.json()
-        except ValueError:
+    content_disposition = lower_resp_headers.get("content-disposition", "")
+
+    try:
+        # try to record json data
+        response_body = resp_obj.json()
+    except ValueError:
+        if "image" in content_type or "attachment" in content_disposition:
+            response_body = format_response_body_for_log(
+                resp_obj.content, content_type, content_disposition
+            )
+        else:
             # only record at most 512 text charactors
             resp_text = resp_obj.text
-            response_body = omit_long_data(resp_text)
+            response_body = format_response_body_for_log(
+                resp_text, content_type, content_disposition
+            )
 
     response_data = ResponseData(
         status_code=resp_obj.status_code,
@@ -123,9 +128,20 @@ class HttpSession(requests.Session):
         """
         update request and response info from Response() object.
         """
-        # TODO: fix
-        self.data.req_resps.pop()
-        self.data.req_resps.append(get_req_resp_record(resp_obj))
+        record = get_req_resp_record(resp_obj)
+        if self.data.req_resps:
+            self.data.req_resps[-1] = record
+        else:
+            self.data.req_resps.append(record)
+
+    def _close_request_body(self, request_body):
+        if request_body is None or not hasattr(request_body, "close"):
+            return
+
+        try:
+            request_body.close()
+        except Exception as ex:
+            logger.debug(f"failed to close request body: {ex}")
 
     def request(self, method, url, name=None, **kwargs):
         """
@@ -176,50 +192,53 @@ class HttpSession(requests.Session):
 
         start_timestamp = time.time()
         response = self._send_request_safe_mode(method, url, **kwargs)
-        response_time_ms = round((time.time() - start_timestamp) * 1000, 2)
-
         try:
-            client_ip, client_port = response.raw._connection.sock.getsockname()
-            self.data.address.client_ip = client_ip
-            self.data.address.client_port = client_port
-            logger.debug(f"client IP: {client_ip}, Port: {client_port}")
-        except Exception:
-            pass
+            response_time_ms = round((time.time() - start_timestamp) * 1000, 2)
 
-        try:
-            server_ip, server_port = response.raw._connection.sock.getpeername()
-            self.data.address.server_ip = server_ip
-            self.data.address.server_port = server_port
-            logger.debug(f"server IP: {server_ip}, Port: {server_port}")
-        except Exception:
-            pass
+            try:
+                client_ip, client_port = response.raw._connection.sock.getsockname()
+                self.data.address.client_ip = client_ip
+                self.data.address.client_port = client_port
+                logger.debug(f"client IP: {client_ip}, Port: {client_port}")
+            except Exception:
+                pass
 
-        # get length of the response content
-        content_size = int(dict(response.headers).get("content-length") or 0)
+            try:
+                server_ip, server_port = response.raw._connection.sock.getpeername()
+                self.data.address.server_ip = server_ip
+                self.data.address.server_port = server_port
+                logger.debug(f"server IP: {server_ip}, Port: {server_port}")
+            except Exception:
+                pass
 
-        # record the consumed time
-        self.data.stat.response_time_ms = response_time_ms
-        self.data.stat.elapsed_ms = response.elapsed.microseconds / 1000.0
-        self.data.stat.content_size = content_size
+            # get length of the response content
+            content_size = int(dict(response.headers).get("content-length") or 0)
 
-        # record request and response histories, include 30X redirection
-        response_list = response.history + [response]
-        self.data.req_resps = [
-            get_req_resp_record(resp_obj) for resp_obj in response_list
-        ]
+            # record the consumed time
+            self.data.stat.response_time_ms = response_time_ms
+            self.data.stat.elapsed_ms = response.elapsed.microseconds / 1000.0
+            self.data.stat.content_size = content_size
 
-        try:
-            response.raise_for_status()
-        except RequestException as ex:
-            logger.error(f"{str(ex)}")
-        else:
-            logger.info(
-                f"status_code: {response.status_code}, "
-                f"response_time(ms): {response_time_ms} ms, "
-                f"response_length: {content_size} bytes"
-            )
+            # record request and response histories, include 30X redirection
+            response_list = response.history + [response]
+            self.data.req_resps = [
+                get_req_resp_record(resp_obj) for resp_obj in response_list
+            ]
 
-        return response
+            try:
+                response.raise_for_status()
+            except RequestException as ex:
+                logger.error(f"{str(ex)}")
+            else:
+                logger.info(
+                    f"status_code: {response.status_code}, "
+                    f"response_time(ms): {response_time_ms} ms, "
+                    f"response_length: {content_size} bytes"
+                )
+
+            return response
+        finally:
+            self._close_request_body(kwargs.get("data"))
 
     def _send_request_safe_mode(self, method, url, **kwargs):
         """
