@@ -142,8 +142,8 @@ class ResponseObjectBase(object):
 
         extract_mapping = {}
         for key, field in extractors.items():
-            if "$" in field:
-                # field contains variable or function
+            # Only parse and jmespath-search if field is a string
+            if isinstance(field, str) and "$" in field:
                 field = self.parser.parse_data(field, variables_mapping)
             field_value = self._search_jmespath(field)
             extract_mapping[key] = field_value
@@ -152,6 +152,9 @@ class ResponseObjectBase(object):
         return extract_mapping
 
     def _search_jmespath(self, expr: Text) -> Any:
+        # If expr is not a string, return it directly (non-JSON objects from hooks/exports)
+        if not isinstance(expr, str):
+            return expr
         try:
             check_value = jmespath.search(expr, self.resp_obj)
         except JMESPathError as ex:
@@ -169,9 +172,7 @@ class ResponseObjectBase(object):
         validators: Validators,
         variables_mapping: VariablesMapping = None,
     ):
-
         variables_mapping = variables_mapping or {}
-
         self.validation_results = {}
         if not validators:
             return
@@ -180,37 +181,30 @@ class ResponseObjectBase(object):
         failures = []
 
         for v in validators:
-
             if "validate_extractor" not in self.validation_results:
                 self.validation_results["validate_extractor"] = []
 
             u_validator = uniform_validator(v)
 
-            # check item
             check_item = u_validator["check"]
-            if "$" in check_item:
-                # check_item is variable or function
+            # Only parse and jmespath-search if check_item is a string
+            if isinstance(check_item, str) and "$" in check_item:
                 check_item = self.parser.parse_data(check_item, variables_mapping)
                 check_item = parse_string_value(check_item)
 
-            if check_item and isinstance(check_item, Text):
+            if isinstance(check_item, str) and check_item:
                 check_value = self._search_jmespath(check_item)
             else:
                 # variable or function evaluation result is "" or not text
                 check_value = check_item
 
-            # comparator
             assert_method = u_validator["assert"]
             assert_func = self.parser.get_mapping_function(assert_method)
 
-            # expect item
             expect_item = u_validator["expect"]
-            # parse expected value with config/teststep/extracted variables
             expect_value = self.parser.parse_data(expect_item, variables_mapping)
 
-            # message
             message = u_validator["message"]
-            # parse message with config/teststep/extracted variables
             message = self.parser.parse_data(message, variables_mapping)
 
             validate_msg = f"assert {check_item} {assert_method} {expect_value}({type(expect_value).__name__})"
@@ -281,9 +275,12 @@ class ResponseObject(ResponseObjectBase):
             "cookies": self.cookies,
             "body": self.body,
         }
-        if not expr.startswith(tuple(resp_obj_meta.keys())):
-            if hasattr(self.resp_obj,expr):
-                return getattr(self.resp_obj,expr)
+        # If expr is not a string, return it directly (non-JSON objects from hooks/exports)
+        if not isinstance(expr, str):
+            return expr
+        if isinstance(expr, str) and not expr.startswith(tuple(resp_obj_meta.keys())):
+            if hasattr(self.resp_obj, expr):
+                return getattr(self.resp_obj, expr)
             else:
                 return expr
 

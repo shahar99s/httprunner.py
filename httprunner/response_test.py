@@ -29,10 +29,10 @@ class TestResponse(unittest.TestCase):
         variables_mapping = {"body": "body"}
         extract_mapping = self.resp_obj.extract(
             {
-                "var_1": "body.json.locations[0]",
-                "var_2": "body.json.locations[3].name",
-                "var_3": "$body.json.locations[3].name",
-                "var_4": "$body.json.locations[3].${get_name()}",
+                "var_1": "body.locations[0]",
+                "var_2": "body.locations[3].name",
+                "var_3": "$body.locations[3].name",
+                "var_4": "$body.locations[3].${get_name()}",
             },
             variables_mapping=variables_mapping,
         )
@@ -44,8 +44,8 @@ class TestResponse(unittest.TestCase):
     def test_validate(self):
         self.resp_obj.validate(
             [
-                {"eq": ["body.json.locations[0].name", "Seattle"]},
-                {"eq": ["body.json.locations[0]", {"name": "Seattle", "state": "WA"}]},
+                {"eq": ["body.locations[0].name", "Seattle"]},
+                {"eq": ["body.locations[0]", {"name": "Seattle", "state": "WA"}]},
             ],
         )
 
@@ -53,7 +53,7 @@ class TestResponse(unittest.TestCase):
         variables_mapping = {"index": 1, "var_empty": ""}
         self.resp_obj.validate(
             [
-                {"eq": ["body.json.locations[$index].name", "New York"]},
+                {"eq": ["body.locations[$index].name", "New York"]},
                 {"eq": ["$var_empty", ""]},
             ],
             variables_mapping=variables_mapping,
@@ -88,3 +88,18 @@ class TestResponse(unittest.TestCase):
         }
         for validator in validators:
             self.assertEqual(uniform_validator(validator), expected)
+
+    def test_extract_with_non_string_value(self):
+        # register a parser function that returns a non-string (dict)
+        self.resp_obj.parser.functions_mapping["return_obj"] = lambda: {"foo": 123}
+        mapping = self.resp_obj.extract({"out": "${return_obj()}"})
+        self.assertIsInstance(mapping["out"], dict)
+        self.assertEqual(mapping["out"], {"foo": 123})
+
+    def test_validate_non_string_check_item(self):
+        # parser returns dict, should be passed through to comparator
+        self.resp_obj.parser.functions_mapping["return_obj"] = lambda: {"foo": 123}
+        # using equality against same dict should pass
+        self.resp_obj.validate([
+            {"eq": ["${return_obj()}", {"foo": 123}]},
+        ])
