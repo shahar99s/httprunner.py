@@ -1,5 +1,5 @@
 """ failure type exceptions
-    these exceptions will mark test as failure
+    these exceptions will mark the run as failure
 """
 
 
@@ -28,7 +28,7 @@ class TeardownHooksFailure(MyBaseFailure):
 
 
 """ error type exceptions
-    these exceptions will mark test as error
+    these exceptions will mark workflow as error
 """
 
 
@@ -40,11 +40,11 @@ class FileFormatError(MyBaseError):
     pass
 
 
-class TestCaseFormatError(FileFormatError):
+class WorkflowFormatError(FileFormatError):
     pass
 
 
-class TestSuiteFormatError(FileFormatError):
+class WorkflowSuiteFormatError(FileFormatError):
     pass
 
 
@@ -80,13 +80,9 @@ class ApiNotFound(NotFoundError):
     pass
 
 
-class TestcaseNotFound(NotFoundError):
+class WorkflowNotFound(NotFoundError):
     pass
 
 
 class SummaryEmpty(MyBaseError):
-    """test result summary data is empty"""
-
-
-class SqlMethodNotSupport(MyBaseError):
-    pass
+    """workflow result summary data is empty"""

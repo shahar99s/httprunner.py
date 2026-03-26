@@ -1,32 +1,15 @@
 import json
 import time
 
-import requests
-import urllib3
+import httpx
 from loguru import logger
-from requests import Request, Response
-from requests.exceptions import (
-    InvalidSchema,
-    InvalidURL,
-    MissingSchema,
-    RequestException,
-)
 
 from httprunner.models import RequestData, ResponseData
 from httprunner.models import SessionData, ReqRespData
 from httprunner.utils import format_response_body_for_log, lower_dict_keys
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-
-class ApiResponse(Response):
-    def raise_for_status(self):
-        if hasattr(self, "error") and self.error:
-            raise self.error
-        Response.raise_for_status(self)
-
-
-def get_req_resp_record(resp_obj: Response) -> ReqRespData:
+def get_req_resp_record(resp_obj: httpx.Response) -> ReqRespData:
     """get request and response info from Response() object."""
 
     def log_print(req_or_resp, r_type):
@@ -40,9 +23,13 @@ def get_req_resp_record(resp_obj: Response) -> ReqRespData:
 
     # record actual request info
     request_headers = dict(resp_obj.request.headers)
-    request_cookies = resp_obj.request._cookies.get_dict()
+    request_cookies = dict(resp_obj.request.headers.get("cookie", ""))
 
-    request_body = resp_obj.request.body
+    request_body = None
+    try:
+        request_body = resp_obj.request.content
+    except httpx.RequestNotRead:
+        pass
     if request_body is not None:
         try:
             request_body = json.loads(request_body)
@@ -63,7 +50,7 @@ def get_req_resp_record(resp_obj: Response) -> ReqRespData:
 
     request_data = RequestData(
         method=resp_obj.request.method,
-        url=resp_obj.request.url,
+        url=str(resp_obj.request.url),
         headers=request_headers,
         cookies=request_cookies,
         body=request_body,
@@ -96,7 +83,7 @@ def get_req_resp_record(resp_obj: Response) -> ReqRespData:
 
     response_data = ResponseData(
         status_code=resp_obj.status_code,
-        cookies=resp_obj.cookies or {},
+        cookies=dict(resp_obj.cookies) if resp_obj.cookies else {},
         encoding=resp_obj.encoding,
         headers=resp_headers,
         content_type=content_type,
@@ -110,18 +97,17 @@ def get_req_resp_record(resp_obj: Response) -> ReqRespData:
     return req_resp_data
 
 
-class HttpSession(requests.Session):
+class HttpSession:
     """
     Class for performing HTTP requests and holding (session-) cookies between requests (in order
     to be able to log in and out of websites). Each request is logged so that HttpRunner can
     display statistics.
 
-    This is a slightly extended version of `python-request <http://python-requests.org>`_'s
-    :py:class:`requests.Session` class and mostly this class works exactly the same.
+    Wraps httpx.Client to provide session-level cookie persistence and request/response logging.
     """
 
     def __init__(self):
-        super(HttpSession, self).__init__()
+        self._client = httpx.Client(verify=False)
         self.data = SessionData()
 
     def update_last_req_resp_record(self, resp_obj):
@@ -145,78 +131,100 @@ class HttpSession(requests.Session):
 
     def request(self, method, url, name=None, **kwargs):
         """
-        Constructs and sends a :py:class:`requests.Request`.
-        Returns :py:class:`requests.Response` object.
+        Constructs and sends an HTTP request via httpx.Client.
+        Returns httpx.Response object.
 
-        :param method:
-            method for the new :class:`Request` object.
-        :param url:
-            URL for the new :class:`Request` object.
-        :param name: (optional)
-            Placeholder, make compatible with Locust's HttpSession
-        :param params: (optional)
-            Dictionary or bytes to be sent in the query string for the :class:`Request`.
-        :param data: (optional)
-            Dictionary or bytes to send in the body of the :class:`Request`.
-        :param headers: (optional)
-            Dictionary of HTTP Headers to send with the :class:`Request`.
-        :param cookies: (optional)
-            Dict or CookieJar object to send with the :class:`Request`.
-        :param files: (optional)
-            Dictionary of ``'filename': file-like-objects`` for multipart encoding upload.
-        :param auth: (optional)
-            Auth tuple or callable to enable Basic/Digest/Custom HTTP Auth.
-        :param timeout: (optional)
-            How long to wait for the server to send data before giving up, as a float, or \
-            a (`connect timeout, read timeout <user/advanced.html#timeouts>`_) tuple.
-            :type timeout: float or tuple
-        :param allow_redirects: (optional)
-            Set to True by default.
-        :type allow_redirects: bool
-        :param proxies: (optional)
-            Dictionary mapping protocol to the URL of the proxy.
-        :param stream: (optional)
-            whether to immediately download the response content. Defaults to ``False``.
-        :param verify: (optional)
-            if ``True``, the SSL cert will be verified. A CA_BUNDLE path can also be provided.
-        :param cert: (optional)
-            if String, path to ssl client cert file (.pem). If Tuple, ('cert', 'key') pair.
+        :param method: HTTP method (GET, POST, etc.)
+        :param url: URL for the request.
+        :param name: (optional) Placeholder for compatibility.
+        :param params: (optional) Query parameters.
+        :param data: (optional) Form data body.
+        :param headers: (optional) HTTP headers.
+        :param cookies: (optional) Cookies dict.
+        :param json: (optional) JSON body.
+        :param files: (optional) Upload files.
+        :param auth: (optional) Auth tuple.
+        :param timeout: (optional) Timeout in seconds (default 120).
+        :param follow_redirects: (optional) Whether to follow redirects (default True).
+        :param verify: (optional) SSL verification (mapped to client config).
         """
         self.data = SessionData()
 
         # timeout default to 120 seconds
         kwargs.setdefault("timeout", 120)
 
-        # set stream to True, in order to get client/server IP/Port
-        kwargs["stream"] = True
+        # map requests-style kwargs to httpx equivalents
+        if "allow_redirects" in kwargs:
+            kwargs["follow_redirects"] = kwargs.pop("allow_redirects")
+        kwargs.setdefault("follow_redirects", True)
+
+        # httpx doesn't use 'stream' kwarg in the same way; remove it
+        kwargs.pop("stream", None)
+
+        # httpx uses 'verify' on the client, not per-request; remove it
+        verify = kwargs.pop("verify", None)
+        if verify is not None:
+            self._client = httpx.Client(verify=verify)
+
+        # map 'proxies' to httpx 'proxy' (single proxy)
+        proxies = kwargs.pop("proxies", None)
+        if proxies:
+            proxy_url = proxies.get("https") or proxies.get("http") or proxies.get("all")
+            if proxy_url:
+                self._client = httpx.Client(verify=verify if verify is not None else False, proxy=proxy_url)
+
+        # httpx: set per-request cookies on the client instead
+        cookies = kwargs.pop("cookies", None)
+        if cookies:
+            self._client.cookies.update(cookies)
+
+        # httpx: 'data' for raw bytes/str should be 'content'
+        data = kwargs.pop("data", None)
+        if data is not None:
+            if isinstance(data, (bytes, str)):
+                kwargs["content"] = data
+            else:
+                kwargs["data"] = data
 
         start_timestamp = time.time()
         response = self._send_request_safe_mode(method, url, **kwargs)
-        try:
-            response_time_ms = round((time.time() - start_timestamp) * 1000, 2)
 
-            try:
-                client_ip, client_port = response.raw._connection.sock.getsockname()
+        # Extract socket info while the stream is still open (before read())
+        try:
+            hs = response.stream._stream._httpcore_stream
+            pool = hs._pool
+            if pool.connections:
+                inner_conn = pool.connections[-1]._connection
+                raw_sock = inner_conn._network_stream._sock
+                client_ip, client_port = raw_sock.getsockname()
                 self.data.address.client_ip = client_ip
                 self.data.address.client_port = client_port
-                logger.debug(f"client IP: {client_ip}, Port: {client_port}")
-            except Exception:
-                pass
-
-            try:
-                server_ip, server_port = response.raw._connection.sock.getpeername()
+                server_ip, server_port = raw_sock.getpeername()
                 self.data.address.server_ip = server_ip
                 self.data.address.server_port = server_port
+                logger.debug(f"client IP: {client_ip}, Port: {client_port}")
                 logger.debug(f"server IP: {server_ip}, Port: {server_port}")
+        except Exception:
+            pass
+
+        # Ensure the response body is fully read so that .elapsed is available
+        if not response.is_stream_consumed:
+            try:
+                response.read()
             except Exception:
                 pass
+        try:
+            response_time_ms = round((time.time() - start_timestamp) * 1000, 2)
 
             # get length of the response content
             content_size = int(dict(response.headers).get("content-length") or 0)
 
             # record the consumed time
             self.data.stat.response_time_ms = response_time_ms
-            self.data.stat.elapsed_ms = response.elapsed.microseconds / 1000.0
+            try:
+                self.data.stat.elapsed_ms = response.elapsed.total_seconds() * 1000.0
+            except RuntimeError:
+                self.data.stat.elapsed_ms = response_time_ms
             self.data.stat.content_size = content_size
 
             # record request and response histories, include 30X redirection
@@ -227,7 +235,7 @@ class HttpSession(requests.Session):
 
             try:
                 response.raise_for_status()
-            except RequestException as ex:
+            except httpx.HTTPStatusError as ex:
                 logger.error(f"{str(ex)}")
             else:
                 logger.info(
@@ -242,16 +250,19 @@ class HttpSession(requests.Session):
 
     def _send_request_safe_mode(self, method, url, **kwargs):
         """
-        Send a HTTP request, and catch any exception that might occur due to connection problems.
-        Safe mode has been removed from requests 1.x.
+        Send an HTTP request, and catch any exception that might occur due to connection problems.
         """
         try:
-            return requests.Session.request(self, method, url, **kwargs)
-        except (MissingSchema, InvalidSchema, InvalidURL):
+            return self._client.request(method, url, **kwargs)
+        except (httpx.UnsupportedProtocol, httpx.InvalidURL):
             raise
-        except RequestException as ex:
-            resp = ApiResponse()
-            resp.error = ex
-            resp.status_code = 0  # with this status_code, content returns None
-            resp.request = Request(method, url).prepare()
+        except httpx.HTTPError as ex:
+            resp = httpx.Response(
+                status_code=0,
+                request=httpx.Request(method, url),
+            )
+            resp._error = ex
             return resp
+
+    def close(self):
+        self._client.close()

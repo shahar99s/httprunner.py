@@ -1,12 +1,12 @@
 config:
-    name: "reference testcase unittest for abnormal folder path"
+    name: "reference workflow for abnormal folder path"
     base_url: "https://postman-echo.com"
     verify: False
 
-teststeps:
+steps:
 -
     name: request with functions
-    testcase: a-b.c/1.yml
+    workflow: a-b.c/1.yml
     export:
         - session_foo2
 -

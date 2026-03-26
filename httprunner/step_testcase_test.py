@@ -2,48 +2,48 @@ import unittest
 
 from httprunner import Config
 from httprunner.runner import HttpRunner
-from httprunner.step_testcase import RunTestCase
+from httprunner.step_workflow import RunWorkflow
 from examples.postman_echo.request_methods.request_with_functions_test import (
-    TestCaseRequestWithFunctions,
+    WorkflowRequestWithFunctions,
 )
 
 
 class InspectReferencedCase(HttpRunner):
     last_summary_name = None
 
-    config = Config("original referenced testcase")
-    teststeps = []
+    config = Config("original referenced workflow")
+    steps = []
 
-    def test_start(self, param=None):
-        result = super().test_start(param)
+    def run(self, param=None):
+        result = super().run(param)
         type(self).last_summary_name = self.get_summary().name
         return result
 
 
-class TestRunTestCase(unittest.TestCase):
+class TestRunWorkflow(unittest.TestCase):
     def setUp(self):
-        self.runner = TestCaseRequestWithFunctions()
-        self.runner.test_start()
+        self.runner = WorkflowRequestWithFunctions()
+        self.runner.run()
 
-    def test_run_testcase_by_path(self):
+    def test_run_workflow_by_path(self):
 
         step_result = (
-            RunTestCase("run referenced testcase")
-            .call(TestCaseRequestWithFunctions)
+            RunWorkflow("run referenced workflow")
+            .call(WorkflowRequestWithFunctions)
             .run(self.runner)
         )
         self.assertTrue(step_result.success)
-        self.assertEqual(step_result.name, "run referenced testcase")
+        self.assertEqual(step_result.name, "run referenced workflow")
         self.assertEqual(len(step_result.data), 3)
         self.assertEqual(step_result.data[0].name, "get with params")
         self.assertEqual(step_result.data[1].name, "post raw text")
         self.assertEqual(step_result.data[2].name, "post form data")
 
-    def test_run_testcase_overrides_referenced_case_name(self):
+    def test_run_workflow_overrides_referenced_case_name(self):
         InspectReferencedCase.last_summary_name = None
 
         step_result = (
-            RunTestCase("override referenced testcase name")
+            RunWorkflow("override referenced workflow name")
             .call(InspectReferencedCase)
             .run(self.runner)
         )
@@ -51,5 +51,5 @@ class TestRunTestCase(unittest.TestCase):
         self.assertTrue(step_result.success)
         self.assertEqual(
             InspectReferencedCase.last_summary_name,
-            "override referenced testcase name",
+            "override referenced workflow name",
         )

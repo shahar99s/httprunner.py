@@ -637,17 +637,6 @@ type = "legacy"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 reference = "tsinghua"
 
-[[package]]
-name = "jmespath"
-version = "0.9.5"
-description = "JSON Matching Expressions"
-optional = false
-python-versions = "*"
-files = [
-    {file = "jmespath-0.9.5-py2.py3-none-any.whl", hash = "sha256:695cb76fa78a10663425d5b73ddc5714eb711157e52704d69be03b1a02ba4fec"},
-    {file = "jmespath-0.9.5.tar.gz", hash = "sha256:cca55c8d153173e21baa59983015ad0daf603f9cb799904ff057bfb8ff8dc2d9"},
-]
-
 [package.source]
 type = "legacy"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -1226,16 +1215,6 @@ type = "legacy"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 reference = "tsinghua"
 
-[[package]]
-name = "thrift"
-version = "0.16.0"
-description = "Python bindings for the Apache Thrift RPC system"
-optional = true
-python-versions = "*"
-files = [
-    {file = "thrift-0.16.0.tar.gz", hash = "sha256:2b5b6488fcded21f9d312aa23c9ff6a0195d0f6ae26ddbd5ad9e3e25dfc14408"},
-]
-
 [package.dependencies]
 six = ">=1.7.2"
 
@@ -1248,16 +1227,6 @@ twisted = ["twisted"]
 type = "legacy"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 reference = "tsinghua"
-
-[[package]]
-name = "thriftpy2"
-version = "0.4.16"
-description = "Pure python implementation of Apache Thrift."
-optional = true
-python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*"
-files = [
-    {file = "thriftpy2-0.4.16.tar.gz", hash = "sha256:2aa67ecda99a948e4146341d388260b48ee7da5dfb9a951c4151988e2ed2fb4c"},
-]
 
 [package.dependencies]
 ply = ">=3.4,<4.0"
@@ -1438,7 +1407,6 @@ reference = "tsinghua"
 [extras]
 allure = ["allure-pytest"]
 sql = ["pymysql", "sqlalchemy"]
-thrift = ["cython", "thrift", "thriftpy2"]
 upload = ["filetype", "requests-toolbelt"]
 
 [metadata]

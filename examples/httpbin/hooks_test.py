@@ -3,14 +3,14 @@
 from httprunner import HttpRunner, Config, Step, RunRequest
 
 
-class TestCaseHooks(HttpRunner):
+class WorkflowHooks(HttpRunner):
 
-    config = Config("basic test with httpbin").base_url("${get_httpbin_server()}")
+    config = Config("basic workflow with httpbin").base_url("${get_httpbin_server()}")
 
-    teststeps = [
+    steps = [
         Step(
             RunRequest("headers")
-            .with_variables(**{"a": 123})
+            .variables(**{"a": 123})
             .setup_hook("${setup_hook_add_kwargs($request)}")
             .setup_hook("${setup_hook_remove_kwargs($request)}")
             .get("/headers")
@@ -32,4 +32,4 @@ class TestCaseHooks(HttpRunner):
 
 
 if __name__ == "__main__":
-    TestCaseHooks().test_start()
+    WorkflowHooks().run()

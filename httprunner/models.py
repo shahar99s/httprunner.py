@@ -1,6 +1,6 @@
 import os
 from enum import Enum
-from typing import Any, Callable, Dict, List, Text, Union
+from typing import Any, Dict, List, Text, Union
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -8,11 +8,10 @@ Name = Text
 Url = Text
 BaseUrl = Union[HttpUrl, Text]
 VariablesMapping = Dict[Text, Any]
-FunctionsMapping = Dict[Text, Callable]
 Headers = Dict[Text, Text]
 Cookies = Dict[Text, Text]
 Verify = bool
-Hooks = List[Union[Text, Dict[Text, Text]]]
+Hooks = List[Any]  # callable or dict mapping var_name to callable
 Export = List[Text]
 Validators = List[Dict]
 Env = Dict[Text, Any]
@@ -28,117 +27,27 @@ class MethodEnum(Text, Enum):
     PATCH = "PATCH"
 
 
-class ProtoType(Enum):
-    Binary = 1
-    CyBinary = 2
-    Compact = 3
-    Json = 4
-
-
-class TransType(Enum):
-    Buffered = 1
-    CyBuffered = 2
-    Framed = 3
-    CyFramed = 4
-
-
-# configs for thrift rpc
-class TConfigThrift(BaseModel):
-    psm: Text = None
-    env: Text = None
-    cluster: Text = None
-    target: Text = None
-    include_dirs: List[Text] = None
-    thrift_client: Any = None
-    timeout: int = 10
-    idl_path: Text = None
-    method: Text = None
-    ip: Text = "127.0.0.1"
-    port: int = 9000
-    service_name: Text = None
-    proto_type: ProtoType = ProtoType.Binary
-    trans_type: TransType = TransType.Buffered
-
-
-# configs for db
-class TConfigDB(BaseModel):
-    psm: Text = None
-    user: Text = None
-    password: Text = None
-    ip: Text = None
-    port: int = 3306
-    database: Text = None
-
-
-class TransportEnum(Text, Enum):
-    BUFFERED = "buffered"
-    FRAMED = "framed"
-
-
-class TThriftRequest(BaseModel):
-    """rpc request model"""
-
-    method: Text = ""
-    params: Dict = {}
-    thrift_client: Any = None
-    idl_path: Text = ""  # idl local path
-    timeout: int = 10  # sec
-    transport: TransportEnum = TransportEnum.BUFFERED
-    include_dirs: List[Union[Text, None]] = []  # param of thriftpy2.load
-    target: Text = ""  # tcp://{ip}:{port} or sd://psm?cluster=xx&env=xx
-    env: Text = "prod"
-    cluster: Text = "default"
-    psm: Text = ""
-    service_name: Text = None
-    ip: Text = None
-    port: int = None
-    proto_type: ProtoType = None
-    trans_type: TransType = None
-
-
-class SqlMethodEnum(Text, Enum):
-    FETCHONE = "FETCHONE"
-    FETCHMANY = "FETCHMANY"
-    FETCHALL = "FETCHALL"
-    INSERT = "INSERT"
-    UPDATE = "UPDATE"
-    DELETE = "DELETE"
-
-
-class TSqlRequest(BaseModel):
-    """sql request model"""
-
-    db_config: TConfigDB = TConfigDB()
-    method: SqlMethodEnum = None
-    sql: Text = None
-    size: int = 0  # limit nums of sql result
-
-
 class TConfig(BaseModel):
     name: Name
     verify: Verify = False
     base_url: BaseUrl = ""
     add_request_id: bool = True
-    # Text: prepare variables in debugtalk.py, ${gen_variables()}
-    variables: Union[VariablesMapping, Text] = {}
-    parameters: Union[VariablesMapping, Text] = {}
-    # setup_hooks: Hooks = []
-    # teardown_hooks: Hooks = []
+    variables: VariablesMapping = {}
     export: Export = []
     path: Text = None
-    # configs for other protocols
-    thrift: TConfigThrift = None
-    db: TConfigDB = TConfigDB()
 
 
 class TRequest(BaseModel):
-    """requests.Request model"""
+    """HTTP request model"""
+
+    class Config:
+        arbitrary_types_allowed = True
 
     method: MethodEnum
-    url: Url
+    url: Any = ""  # str or callable
     params: Dict[Text, Text] = {}
     headers: Headers = {}
-    req_json: Union[Dict, List, Text] = Field(None, alias="json")
+    req_json: Any = Field(None, alias="json")  # dict, list, str, or callable
     data: Union[Text, Dict[Text, Any]] = None
     cookies: Cookies = {}
     timeout: float = 120
@@ -148,53 +57,41 @@ class TRequest(BaseModel):
 
 
 class TStep(BaseModel):
+    class Config:
+        arbitrary_types_allowed = True
+
     name: Name
     request: Union[TRequest, None] = None
-    testcase: Union[Text, Callable, None] = None
+    workflow: Any = None  # reference to another HttpRunner subclass
     variables: VariablesMapping = {}
     setup_hooks: Hooks = []
     teardown_hooks: Hooks = []
     # used to extract request's response field
     extract: VariablesMapping = {}
-    # used to export session variables from referenced testcase
+    # used to export session variables from referenced workflow
     export: Export = []
     validators: Validators = Field([], alias="validate")
     validate_script: List[Text] = []
     retry_times: int = 0
     retry_interval: int = 0  # sec
-    thrift_request: Union[TThriftRequest, None] = None
-    sql_request: Union[TSqlRequest, None] = None
 
 
-class TestCase(BaseModel):
+class Workflow(BaseModel):
     config: TConfig
-    teststeps: List[TStep]
+    steps: List[TStep]
 
 
 class ProjectMeta(BaseModel):
-    debugtalk_py: Text = ""  # debugtalk.py file content
-    debugtalk_path: Text = ""  # debugtalk.py file path
-    dot_env_path: Text = ""  # .env file path
-    functions: FunctionsMapping = {}  # functions defined in debugtalk.py
-    variables: VariablesMapping = {}  # variables defined in debugtalk.py
-    env: Env = {}
-    RootDir: Text = (
-        os.getcwd()
-    )  # project root directory (ensure absolute), the path debugtalk.py located
+    RootDir: Text = os.getcwd()
 
 
-class TestsMapping(BaseModel):
-    project_meta: ProjectMeta
-    testcases: List[TestCase]
-
-
-class TestCaseTime(BaseModel):
+class WorkflowTime(BaseModel):
     start_at: float = 0
     start_at_iso_format: Text = ""
     duration: float = 0
 
 
-class TestCaseInOut(BaseModel):
+class WorkflowInOut(BaseModel):
     config_vars: VariablesMapping = {}
     export_vars: Dict = {}
 
@@ -247,16 +144,16 @@ class SessionData(BaseModel):
 
 
 class StepResult(BaseModel):
-    """teststep data, each step maybe corresponding to one request or one testcase"""
+    """step data, each step maybe corresponding to one request or one workflow"""
 
-    name: Text = ""  # teststep name
-    step_type: Text = ""  # teststep type, request or testcase
+    name: Text = ""  # step name
+    step_type: Text = ""  # step type, request or workflow
     success: bool = False
     data: Union[SessionData, List["StepResult"]] = None
-    elapsed: float = 0.0  # teststep elapsed time
+    elapsed: float = 0.0  # step elapsed time
     content_size: float = 0  # response content size
     export_vars: VariablesMapping = {}
-    attachment: Text = ""  # teststep attachment
+    attachment: Text = ""  # step attachment
 
 
 StepResult.update_forward_refs()
@@ -277,12 +174,12 @@ class IStep(object):
         raise NotImplementedError
 
 
-class TestCaseSummary(BaseModel):
+class WorkflowSummary(BaseModel):
     name: Text
     success: bool
     case_id: Text
-    time: TestCaseTime
-    in_out: TestCaseInOut = {}
+    time: WorkflowTime
+    in_out: WorkflowInOut = {}
     log: Text = ""
     step_results: List[StepResult] = []
 
@@ -299,9 +196,9 @@ class Stat(BaseModel):
     fail: int = 0
 
 
-class TestSuiteSummary(BaseModel):
+class WorkflowSuiteSummary(BaseModel):
     success: bool = False
     stat: Stat = Stat()
-    time: TestCaseTime = TestCaseTime()
+    time: WorkflowTime = WorkflowTime()
     platform: PlatformInfo
-    testcases: List[TestCaseSummary]
+    workflows: List[WorkflowSummary]

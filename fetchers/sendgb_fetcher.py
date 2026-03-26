@@ -16,22 +16,25 @@ class SendgbFetcherFactory:
     has downloads count: Yes
     """
 
+    URL_PATTERN = re.compile(r"(?:https?://)(?:www\.)?sendgb\.com/(?:upload/\?utm_source=)?([0-9a-zA-Z]+)")
+
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        return bool(cls.URL_PATTERN.search(url))
+
     def __init__(
         self_factory,
         link: str,
         password: str | None = None,
         headers: Dict[str, str] | None = None,
     ):
+        if not self_factory.is_relevant_url(link):
+            raise ValueError("Error: Invalid SendGB URL provided")
         self_factory.link = link
         self_factory.password = password
         self_factory.headers = headers or {}
 
-        match = re.search(
-            r"(?:https?://)(?:www\.)?sendgb\.com/(?:upload/\?utm_source=)?([0-9a-zA-Z]+)",
-            self_factory.link,
-        )
-        if not match:
-            raise ValueError("Error: Invalid SendGB URL provided")
+        match = self_factory.URL_PATTERN.search(self_factory.link)
         self_factory.id = match.group(1)
 
     def create(self_factory, mode: Mode = Mode.FETCH) -> BaseFetcher:
@@ -110,68 +113,66 @@ class SendgbFetcherFactory:
                 if direct and should_download(mode, 1):
                     self.save_file_outer(response)
 
-            info_steps = [
-                Step(
-                    RunRequest("get upload page")
-                    .get(f"/upload/?utm_source={self_factory.id}")
-                    .with_headers(**self_factory.headers)
-                    .teardown_hook("${default_downloads_count()}", "downloads_count")
-                    .teardown_hook("${is_direct_download($response)}", "direct_download")
-                    .teardown_hook("${extract_secret_code($response)}", "secret_code")
-                    .teardown_hook("${extract_file_attr($response)}", "file")
-                    .teardown_hook("${extract_private_id($response)}", "private_id")
-                    .teardown_hook("${extract_is_deleted($response)}", "is_deleted")
-                    .teardown_hook("${extract_metadata($response)}", "metadata")
-                    .teardown_hook("${log_fetch_state($metadata, $downloads_count)}")
-                    .teardown_hook("${save_if_direct($response, $direct_download)}")
-                    .extract()
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("$secret_code", "secret_code")
-                    .with_jmespath("$file", "file")
-                    .with_jmespath("$private_id", "private_id")
-                    .with_jmespath("$is_deleted", "is_deleted")
-                    .validate()
-                    .assert_equal("status_code", 200)
-                    .assert_equal("$is_deleted", False)
-                )
-            ]
-            fetch_steps = info_steps.copy()
-            fetch_steps.extend(
-                [
-                    OptionalStep(
-                        RunRequest("create direct link")
-                        .get(
-                            f"/src/download_one.php?uploadId={self_factory.id}&sc=$secret_code&file=$file&private_id=$private_id"
-                        )
-                        .with_headers(**self_factory.headers)
-                        .extract()
-                        .with_jmespath("body.url", "direct_link")
+            def __init__(self):
+                super().__init__()
+                info_steps = [
+                    Step(
+                        RunRequest("get upload page")
+                        .get(f"/upload/?utm_source={self_factory.id}")
+                        .headers(**self_factory.headers)
+                        .teardown_callback("default_downloads_count()", assign="downloads_count")
+                        .teardown_callback("is_direct_download(response)", assign="direct_download")
+                        .teardown_callback("extract_secret_code(response)", assign="secret_code")
+                        .teardown_callback("extract_file_attr(response)", assign="file")
+                        .teardown_callback("extract_private_id(response)", assign="private_id")
+                        .teardown_callback("extract_is_deleted(response)", assign="is_deleted")
+                        .teardown_callback("extract_metadata(response)", assign="metadata")
+                        .teardown_callback("log_fetch_state(metadata, downloads_count)")
+                        .teardown_callback("save_if_direct(response, direct_download)")
                         .validate()
                         .assert_equal("status_code", 200)
-                        .assert_equal("body.success", True)
-                    ).when(
-                        lambda step, vars: (
-                            should_download(mode, vars.get("downloads_count"))
-                            and not vars.get("direct_download", False)
-                        )
-                    ),
-                    OptionalStep(
-                        RunRequest("download")
-                        .get("$direct_link")
-                        .with_headers(**self_factory.headers)
-                        .teardown_hook("${save_file_outer($response)}")
-                        .validate()
-                        .assert_equal("status_code", 200)
-                    ).when(
-                        lambda step, vars: (
-                            should_download(mode, vars.get("downloads_count"))
-                            and not vars.get("direct_download", False)
-                        )
-                    ),
+                        .assert_equal("is_deleted", False)
+                    )
                 ]
-            )
+                fetch_steps = info_steps.copy()
+                fetch_steps.extend(
+                    [
+                        OptionalStep(
+                            Step(
+                                RunRequest("create direct link")
+                                .get(
+                                    lambda v: f"/src/download_one.php?uploadId={self_factory.id}&sc={v['secret_code']}&file={v['file']}&private_id={v['private_id']}"
+                                )
+                                .headers(**self_factory.headers)
+                                .teardown_callback("response.body['url']", assign="direct_link")
+                                .validate()
+                                .assert_equal("status_code", 200)
+                                .assert_equal("body.success", True)
+                            )
+                        ).when(
+                            lambda step, vars: (
+                                should_download(mode, vars.get("downloads_count"))
+                                and not vars.get("direct_download", False)
+                            )
+                        ),
+                        OptionalStep(
+                            Step(
+                                RunRequest("download")
+                                .get("$direct_link")
+                                .headers(**self_factory.headers)
+                                .teardown_callback("save_file_outer(response)")
+                                .validate()
+                                .assert_equal("status_code", 200)
+                            )
+                        ).when(
+                            lambda step, vars: (
+                                should_download(mode, vars.get("downloads_count"))
+                                and not vars.get("direct_download", False)
+                            )
+                        ),
+                    ]
+                )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+                self.steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return SendgbFetcher()

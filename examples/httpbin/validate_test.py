@@ -3,15 +3,15 @@
 from httprunner import HttpRunner, Config, Step, RunRequest
 
 
-class TestCaseValidate(HttpRunner):
+class WorkflowValidate(HttpRunner):
 
-    config = Config("basic test with httpbin").base_url("${get_httpbin_server()}")
+    config = Config("basic workflow with httpbin").base_url("${get_httpbin_server()}")
 
-    teststeps = [
+    steps = [
         Step(
             RunRequest("validate response with json path")
             .get("/get")
-            .with_params(**{"a": 1, "b": 2})
+            .params(**{"a": 1, "b": 2})
             .validate()
             .assert_equal("status_code", 200)
             .assert_equal("body.args.a", "1")
@@ -20,7 +20,7 @@ class TestCaseValidate(HttpRunner):
         Step(
             RunRequest("validate response with python script")
             .get("/get")
-            .with_params(**{"a": 1, "b": 2})
+            .params(**{"a": 1, "b": 2})
             .validate()
             .assert_equal("status_code", 200)
         ),
@@ -28,4 +28,4 @@ class TestCaseValidate(HttpRunner):
 
 
 if __name__ == "__main__":
-    TestCaseValidate().test_start()
+    WorkflowValidate().run()

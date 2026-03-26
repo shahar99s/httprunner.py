@@ -1,12 +1,12 @@
 config:
-    name: basic test with httpbin
+    name: basic workflow with httpbin
     base_url: ${get_httpbin_server()}
     setup_hooks:
         - ${hook_print(setup)}
     teardown_hooks:
         - ${hook_print(teardown)}
 
-teststeps:
+steps:
 -
     name: headers
     variables:

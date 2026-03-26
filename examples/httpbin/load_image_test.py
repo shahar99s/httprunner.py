@@ -3,11 +3,11 @@
 from httprunner import HttpRunner, Config, Step, RunRequest
 
 
-class TestCaseLoadImage(HttpRunner):
+class WorkflowLoadImage(HttpRunner):
 
     config = Config("load images").base_url("${get_httpbin_server()}")
 
-    teststeps = [
+    steps = [
         Step(
             RunRequest("get png image")
             .get("/image/png")
@@ -36,4 +36,4 @@ class TestCaseLoadImage(HttpRunner):
 
 
 if __name__ == "__main__":
-    TestCaseLoadImage().test_start()
+    WorkflowLoadImage().run()

@@ -23,12 +23,22 @@ class TransferNowFetcherFactory:
     note: Also save source IP for each download
     """
 
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        try:
+            cls._parse_link(url)
+            return True
+        except ValueError:
+            return False
+
     def __init__(
         self,
         link: str,
         sender_secret: str | None = None,
         headers: Dict[str, str] | None = None,
     ):
+        if not self.is_relevant_url(link):
+            raise ValueError("Error: No valid TransferNow URL provided")
         self.link = link
         self.sender_secret = sender_secret
         self.headers = headers or {}
@@ -179,31 +189,20 @@ class TransferNowFetcherFactory:
                 Step(
                     RunRequest("load transfer page")
                     .get(f"/en/cld?utm_source={transfer_id}&utm_medium={secret}")
-                    .with_headers(**self.headers)
-                    .teardown_hook("${default_downloads_count()}", "downloads_count")
-                    .teardown_hook("${extract_metadata($response)}", "metadata")
-                    .teardown_hook("${extract_primary_file($response)}", "primary_file")
-                    .teardown_hook("${extract_file_id($primary_file)}", "file_id")
-                    .teardown_hook("${extract_filename($primary_file)}", "filename")
-                    .teardown_hook(
-                        "${extract_download_start_path($response)}",
-                        "download_start_path",
+                    .headers(**self.headers)
+                    .teardown_callback("default_downloads_count()", assign="downloads_count")
+                    .teardown_callback("extract_metadata(response)", assign="metadata")
+                    .teardown_callback("extract_primary_file(response)", assign="primary_file")
+                    .teardown_callback("extract_file_id(primary_file)", assign="file_id")
+                    .teardown_callback("extract_filename(primary_file)", assign="filename")
+                    .teardown_callback("extract_download_start_path(response)", assign="download_start_path")
+                    .teardown_callback("is_available(response)", assign="available")
+                    .teardown_callback(
+                        "log_fetch_state(metadata, downloads_count, None, filename, primary_file, None)"
                     )
-                    .teardown_hook("${is_available($response)}", "available")
-                    .teardown_hook(
-                        "${log_fetch_state($metadata, $downloads_count, None, $filename, $primary_file, None)}"
-                    )
-                    .extract()
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("$primary_file", "primary_file")
-                    .with_jmespath("$file_id", "file_id")
-                    .with_jmespath("$filename", "filename")
-                    .with_jmespath("$download_start_path", "download_start_path")
-                    .with_jmespath("$available", "available")
                     .validate()
                     .assert_equal("status_code", 200)
-                    .assert_equal("$available", True)
+                    .assert_equal("available", True)
                 )
             ]
 
@@ -212,21 +211,12 @@ class TransferNowFetcherFactory:
                     Step(
                         RunRequest("load transfer stats")
                         .get(f"/api/transfer/v2/transfers/{transfer_id}")
-                        .with_headers(**self.headers)
-                        .with_params(senderSecret=sender_secret)
-                        .teardown_hook(
-                            "${extract_stats_downloads_count($response)}",
-                            "downloads_count",
-                        )
-                        .teardown_hook("${extract_stats_views_count($response)}", "views_count")
-                        .teardown_hook("${extract_download_events($response)}", "download_events")
-                        .teardown_hook(
-                            "${log_fetch_state($metadata, $downloads_count, $views_count, $filename, $primary_file, $download_events)}"
-                        )
-                        .extract()
-                        .with_jmespath("$downloads_count", "downloads_count")
-                        .with_jmespath("$views_count", "views_count")
-                        .with_jmespath("$download_events", "download_events")
+                        .headers(**self.headers)
+                        .params(senderSecret=sender_secret)
+                        .teardown_callback("extract_stats_downloads_count(response)", assign="downloads_count")
+                        .teardown_callback("extract_stats_views_count(response)", assign="views_count")
+                        .teardown_callback("extract_download_events(response)", assign="download_events")
+                        .teardown_callback("log_fetch_state(metadata, downloads_count, views_count, filename, primary_file, download_events)")
                         .validate()
                         .assert_equal("status_code", 200)
                     )
@@ -238,28 +228,27 @@ class TransferNowFetcherFactory:
                     OptionalStep(
                         RunRequest("create direct link")
                         .get("/api/transfer/downloads/link")
-                        .with_headers(**self.headers)
-                        .with_params(
+                        .headers(**self.headers)
+                        .params(
                             transferId=transfer_id,
                             userSecret=secret,
                             fileId="$file_id",
                         )
-                        .extract()
-                        .with_jmespath("body.url", "direct_link")
+                        .teardown_callback("response.body['url']", assign="direct_link")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, vars.get("downloads_count"))),
                     OptionalStep(
                         RunRequest("download")
                         .get("$direct_link")
-                        .with_headers(**self.headers)
-                        .teardown_hook("${save_file($response, $filename)}")
+                        .headers(**self.headers)
+                        .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, vars.get("downloads_count"))),
                 ]
             )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+            steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return TransferNowFetcher()

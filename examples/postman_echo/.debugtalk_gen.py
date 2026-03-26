@@ -12,8 +12,8 @@ if __name__ == "__main__":
     import funppy
     funppy.register("get_httprunner_version", get_httprunner_version)
     funppy.register("sum_two", sum_two)
-    funppy.register("get_testcase_config_variables", get_testcase_config_variables)
-    funppy.register("get_testsuite_config_variables", get_testsuite_config_variables)
+    funppy.register("get_workflow_config_variables", get_workflow_config_variables)
+    funppy.register("get_suite_config_variables", get_suite_config_variables)
     funppy.register("get_app_version", get_app_version)
     funppy.register("calculate_two_nums", calculate_two_nums)
     funppy.register("fake_rand_count", fake_rand_count)

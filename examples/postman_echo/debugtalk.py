@@ -9,12 +9,12 @@ def sum_two(m, n):
     return m + n
 
 
-def get_testcase_config_variables():
-    return {"foo1": "testcase_config_bar1", "foo2": "testcase_config_bar2"}
+def get_workflow_config_variables():
+    return {"foo1": "workflow_config_bar1", "foo2": "workflow_config_bar2"}
 
 
-def get_testsuite_config_variables():
-    return {"foo1": "testsuite_config_bar1", "foo2": "testsuite_config_bar2"}
+def get_suite_config_variables():
+    return {"foo1": "suite_config_bar1", "foo2": "suite_config_bar2"}
 
 
 def get_app_version():

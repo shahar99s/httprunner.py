@@ -13,24 +13,24 @@ def get_httpbin_server():
     return HTTP_BIN_URL
 
 
-def setup_testcase(variables):
-    logger.info(f"setup_testcase, variables: {variables}")
+def setup_workflow(variables):
+    logger.info(f"setup_workflow, variables: {variables}")
     variables["request_id_prefix"] = str(int(time.time()))
 
 
-def teardown_testcase():
-    logger.info("teardown_testcase.")
+def teardown_workflow():
+    logger.info("teardown_workflow.")
 
 
-def setup_teststep(request, variables):
-    logger.info(f"setup_teststep, request: {request}, variables: {variables}")
+def setup_step(request, variables):
+    logger.info(f"setup_step, request: {request}, variables: {variables}")
     request.setdefault("headers", {})
     request_id_prefix = variables["request_id_prefix"]
     request["headers"]["HRUN-Request-ID"] = request_id_prefix + "-" + str(uuid.uuid4())
 
 
-def teardown_teststep(response):
-    logger.info(f"teardown_teststep, response status code: {response.status_code}")
+def teardown_step(response):
+    logger.info(f"teardown_step, response status code: {response.status_code}")
 
 
 def sum_two(m, n):

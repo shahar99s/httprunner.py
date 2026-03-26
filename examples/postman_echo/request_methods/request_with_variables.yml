@@ -1,10 +1,10 @@
 config:
-    name: "request methods testcase with variables"
-    variables: ${get_testcase_config_variables()}
+    name: "request methods workflow with variables"
+    variables: ${get_workflow_config_variables()}
     base_url: "https://postman-echo.com"
     verify: False
 
-teststeps:
+steps:
 -
     name: get with params
     variables:
@@ -38,7 +38,7 @@ teststeps:
         data: "This is expected to be sent back as part of response body: $foo1-$foo2-$foo3."
     validate:
         - eq: ["status_code", 200]
-        - eq: ["body.data", "This is expected to be sent back as part of response body: bar12-testcase_config_bar2-bar32."]
+        - eq: ["body.data", "This is expected to be sent back as part of response body: bar12-workflow_config_bar2-bar32."]
 -
     name: post form data
     variables:
@@ -52,7 +52,7 @@ teststeps:
         data: "foo1=$foo1&foo2=$foo2&foo3=$foo3"
     validate:
         - eq: ["status_code", 200]
-        - eq: ["body.form.foo1", "testcase_config_bar1"]
+        - eq: ["body.form.foo1", "workflow_config_bar1"]
         - eq: ["body.form.foo2", "bar23"]
         - eq: ["body.form.foo3", "bar21"]
 
@@ -73,6 +73,6 @@ teststeps:
         json: $jsondata
     validate:
         - eq: ["status_code", 200]
-        - eq: ["body.data.foo1", "testcase_config_bar1"]
+        - eq: ["body.data.foo1", "workflow_config_bar1"]
         - eq: ["body.data.foo2", "bar23"]
         - eq: ["body.data.foo3", "bar21"]

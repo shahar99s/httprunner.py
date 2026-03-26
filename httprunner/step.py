@@ -1,39 +1,17 @@
 from typing import Callable, Union
 
 from httprunner import HttpRunner
-from httprunner.models import StepResult, TRequest, TStep, TestCase
-from httprunner.step_request import (
-    RequestWithOptionalArgs,
-    StepRequestExtraction,
-    StepRequestValidation,
-)
-from httprunner.step_sql_request import (
-    RunSqlRequest,
-    StepSqlRequestExtraction,
-    StepSqlRequestValidation,
-)
-from httprunner.step_testcase import StepRefCase
-from httprunner.step_thrift_request import (
-    RunThriftRequest,
-    StepThriftRequestExtraction,
-    StepThriftRequestValidation,
-)
+from httprunner.models import StepResult, TRequest, TStep, Workflow
+from httprunner.step_request import RunRequest
+from httprunner.step_workflow import StepRefWorkflow
 
 
 class Step(object):
     def __init__(
         self,
         step: Union[
-            StepRequestValidation,
-            StepRequestExtraction,
-            RequestWithOptionalArgs,
-            StepRefCase,
-            RunSqlRequest,
-            StepSqlRequestValidation,
-            StepSqlRequestExtraction,
-            RunThriftRequest,
-            StepThriftRequestValidation,
-            StepThriftRequestExtraction,
+            RunRequest,
+            StepRefWorkflow,
         ],
     ):
         self.__step = step
@@ -43,8 +21,8 @@ class Step(object):
         return self.__step.struct().request
 
     @property
-    def testcase(self) -> TestCase:
-        return self.__step.struct().testcase
+    def workflow(self) -> Workflow:
+        return self.__step.struct().workflow
 
     @property
     def retry_times(self) -> int:

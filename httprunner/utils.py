@@ -12,14 +12,13 @@ import uuid
 from multiprocessing import Queue
 from typing import Any, Dict, List
 
-import requests
 from loguru import logger
 
 from httprunner import __version__, exceptions
 from httprunner.models import VariablesMapping
 
 
-""" run httpbin as test service
+""" run httpbin as a service
 https://github.com/postmanlabs/httpbin
 
 $ docker pull kennethreitz/httpbin
@@ -233,12 +232,26 @@ class ExtendJSONEncoder(json.JSONEncoder):
 def merge_variables(
     variables: VariablesMapping, variables_to_be_overridden: VariablesMapping
 ) -> VariablesMapping:
-    """merge two variables mapping, the first variables have higher priority"""
+    """merge two variables mapping, the first variables have higher priority.
+
+    None values in `variables` do not override an existing non-None value in
+    `variables_to_be_overridden` — None is treated as "unset / keep existing".
+    If the key is absent in `variables_to_be_overridden`, None is still
+    preserved so the parser sees the key as defined.
+    """
     step_new_variables = {}
     for key, value in variables.items():
-        if f"${key}" == value or "${" + key + "}" == value:
-            # e.g. {"base_url": "$base_url"}
-            # or {"base_url": "${base_url}"}
+        # Keep original config value when step variable is only a self-reference
+        # like "$base_url".
+        if (
+            isinstance(value, str)
+            and value in (f"${key}", f"${{{key}}}")
+            and key in variables_to_be_overridden
+        ):
+            continue
+
+        # Skip None if the existing mapping already has a concrete value
+        if value is None and key in variables_to_be_overridden and variables_to_be_overridden[key] is not None:
             continue
 
         step_new_variables[key] = value

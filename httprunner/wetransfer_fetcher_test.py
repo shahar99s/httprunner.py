@@ -3,108 +3,106 @@ import unittest
 from fetchers.wetransfer_fetcher import WeTransferFetcherFactory
 
 
-def _scratch_step(fetcher, index):
-    return fetcher.teststeps[index].struct().request
+def _step_struct(fetcher, index):
+    return fetcher.steps[index].struct()
 
 
 class TestWeTransferFetcherFactory(unittest.TestCase):
-    def test_parsing_full_url_two_parts(self):
-        factory = WeTransferFetcherFactory("https://wetransfer.com/downloads/TID/SEC")
-        fetcher = factory.create()
+    def test_parse_downloads_url_two_parts(self):
+        parsed = WeTransferFetcherFactory._parse_downloads_url(
+            "https://wetransfer.com/downloads/TID/SEC"
+        )
+        self.assertEqual(parsed["transfer_id"], "TID")
+        self.assertEqual(parsed["security_hash"], "SEC")
+        self.assertNotIn("recipient_id", parsed)
 
-        # variables seeded from the original link via the with_variables logic
-        vars_map = fetcher.teststeps[1].struct().variables
-        parser = fetcher.parser
-        self.assertEqual(parser.parse_data(vars_map["security_hash"], {}), "SEC")
-        self.assertEqual(parser.parse_data(vars_map["recipient_id"], {}), None)
-        # the transfer_id is embedded in the post URL because the variable
-        # substitution happened at step parsing time
-        step_req = _scratch_step(fetcher, 1)
-        # URL remains templated until execution
-        self.assertEqual(step_req.url, "https://wetransfer.com/api/v4/transfers/${transfer_id}/download")
-        # simulate runtime substitution to verify it resolves correctly
+    def test_parse_downloads_url_three_parts(self):
+        parsed = WeTransferFetcherFactory._parse_downloads_url(
+            "https://wetransfer.com/downloads/TID/SEC/REC"
+        )
+        self.assertEqual(parsed["transfer_id"], "TID")
+        self.assertEqual(parsed["security_hash"], "SEC")
+        self.assertEqual(parsed["recipient_id"], "REC")
+
+    def test_full_url_builds_callable_request_steps(self):
+        url = "https://wetransfer.com/downloads/TID/SEC"
+        fetcher = WeTransferFetcherFactory(url).create()
+
+        status_step = _step_struct(fetcher, 0)
+        self.assertEqual(status_step.name, "check transfer status")
+        self.assertEqual(status_step.variables, {"download_url": url})
+        self.assertTrue(callable(status_step.request.url))
+        self.assertTrue(callable(status_step.request.req_json))
+        self.assertEqual(len(status_step.setup_hooks), 1)
+
+        vars_map = {"self": fetcher, "download_url": url}
+        status_step.setup_hooks[0](vars_map)
+
+        self.assertEqual(vars_map["transfer_id"], "TID")
+        self.assertEqual(vars_map["security_hash"], "SEC")
+        self.assertIsNone(vars_map["recipient_id"])
         self.assertEqual(
-            fetcher.parser.parse_data(step_req.url, {}),
-            "https://wetransfer.com/api/v4/transfers/TID/download",
+            status_step.request.url(vars_map),
+            "/api/v4/transfers/TID/prepare-download",
+        )
+        self.assertEqual(
+            status_step.request.req_json(vars_map),
+            {"intent": "entire_transfer", "security_hash": "SEC"},
         )
 
-        # helper functions should also return expected results when invoked
-        parser = fetcher.parser
-        self.assertEqual(parser.parse_data("${parse_link_transfer_id()}", {}), "TID")
-        self.assertEqual(parser.parse_data("${parse_link_security_hash()}", {}), "SEC")
-        self.assertIsNone(parser.parse_data("${parse_link_recipient_id()}", {}))
+        direct_link_step = _step_struct(fetcher, 1)
+        self.assertEqual(direct_link_step.name, "create direct link")
+        self.assertTrue(callable(direct_link_step.request.url))
+        self.assertTrue(callable(direct_link_step.request.req_json))
 
-        # the create direct link step still has the request-based setup hook
-        setup_hooks = fetcher.teststeps[1].struct().setup_hooks
-        self.assertEqual(setup_hooks, [{"transfer_id": "${get_transfer_id_from_request($request)}"}])
+    def test_full_url_three_parts_builds_payload_recipient(self):
+        url = "https://wetransfer.com/downloads/TID/SEC/REC"
+        fetcher = WeTransferFetcherFactory(url).create()
+        status_step = _step_struct(fetcher, 0)
 
-    def test_parsing_full_url_three_parts(self):
-        factory = WeTransferFetcherFactory("https://wetransfer.com/downloads/TID/SEC/REC")
-        fetcher = factory.create()
-        vars_map = fetcher.teststeps[1].struct().variables
+        vars_map = {"self": fetcher, "download_url": url}
+        status_step.setup_hooks[0](vars_map)
+
+        self.assertEqual(vars_map["transfer_id"], "TID")
         self.assertEqual(vars_map["security_hash"], "SEC")
         self.assertEqual(vars_map["recipient_id"], "REC")
-
-        parser = fetcher.parser
-        self.assertEqual(parser.parse_data("${parse_link_transfer_id()}", {}), "TID")
-        self.assertEqual(parser.parse_data("${parse_link_recipient_id()}", {}), "REC")
-
-        step_req = _scratch_step(fetcher, 1)
-        setup_hooks = fetcher.teststeps[1].struct().setup_hooks
-        self.assertEqual(setup_hooks, [{"transfer_id": "${get_transfer_id_from_request($request)}"}])
         self.assertEqual(
-            fetcher.parser.parse_data(setup_hooks[0]["transfer_id"], {"request": {"url": step_req.url}}),
-            "TID",
+            status_step.request.req_json(vars_map),
+            {
+                "intent": "entire_transfer",
+                "security_hash": "SEC",
+                "recipient_id": "REC",
+            },
         )
 
-    def test_parsing_raw_id(self):
-        factory = WeTransferFetcherFactory("ABC123")
-        fetcher = factory.create()
-        step_req = _scratch_step(fetcher, 1)
-        # URL template remains unfilled until execution
-        self.assertEqual(step_req.url, "https://wetransfer.com/api/v4/transfers/${transfer_id}/download")
-        # evaluate at runtime
-        self.assertEqual(fetcher.parser.parse_data(step_req.url, {}), "https://wetransfer.com/api/v4/transfers/ABC123/download")
-        # nothing known up-front; only recipient_id is declared as None
-        self.assertEqual(fetcher.teststeps[1].struct().variables, {"recipient_id": None})
+    def test_short_url_inserts_resolver_step(self):
+        url = "https://we.tl/t-foo"
+        fetcher = WeTransferFetcherFactory(url).create()
 
-    def test_short_url(self):
-        factory = WeTransferFetcherFactory("https://we.tl/t-foo")
+        resolver_step = _step_struct(fetcher, 0)
+        self.assertEqual(resolver_step.name, "resolve short url")
+        self.assertEqual(resolver_step.request.url, url)
+        step1_vars = _step_struct(fetcher, 1).variables
+        self.assertIn("download_url", step1_vars)
+        self.assertTrue(callable(step1_vars["download_url"]))
 
-        fetcher = factory.create()
-        step_req = _scratch_step(fetcher, 1)
-        # id not known yet, URL should still use placeholder variable
-        self.assertEqual(step_req.url, "https://wetransfer.com/api/v4/transfers/${transfer_id}/download")
-        # the template value was supplied by the helper function
-        self.assertEqual(fetcher.teststeps[1].struct().variables, {"transfer_id": "$transfer_id", "recipient_id": None})
-
-        # hook still exists; evaluating it against the placeholder URL yields
-        # an empty string until the optional resolver step populates the
-        # variable.
-        setup_hooks = fetcher.teststeps[1].struct().setup_hooks
-        self.assertEqual(setup_hooks, [{"transfer_id": "${get_transfer_id_from_request($request)}"}])
-        # with no transfer_id variable yet, the regex will capture the
-        # literal placeholder rather than returning an empty string
-        self.assertEqual(
-            fetcher.parser.parse_data(setup_hooks[0]["transfer_id"], {"request": {"url": step_req.url}}),
-            "$transfer_id",
-        )
-
-    def test_url_from_main_example(self):
-        # ensure query parameters do not interfere with parsing and that
-        # recipient_id is seeded so building the payload won't raise
+    def test_url_from_main_example_parses_security_hash(self):
         url = (
             "https://wetransfer.com/downloads/"
             "b1446cfa95a605d896ee821c7b76222f20260311083557/0626bd"
             "?t_exp=1773477358&t_lsid=978b789e-6348-4a88-a31f-5f4c19a65395"
         )
-        factory = WeTransferFetcherFactory(url)
+        fetcher = WeTransferFetcherFactory(url).create()
+        status_step = _step_struct(fetcher, 0)
+        vars_map = {"self": fetcher, "download_url": url}
+        status_step.setup_hooks[0](vars_map)
 
-        fetcher = factory.create()
-        vars_map = fetcher.teststeps[1].struct().variables
-        parser = fetcher.parser
-        self.assertEqual(parser.parse_data(vars_map["security_hash"], {}), "0626bd")
-        self.assertEqual(parser.parse_data(vars_map["recipient_id"], {}), None)
+        self.assertEqual(
+            vars_map["transfer_id"],
+            "b1446cfa95a605d896ee821c7b76222f20260311083557",
+        )
+        self.assertEqual(vars_map["security_hash"], "0626bd")
+        self.assertIsNone(vars_map["recipient_id"])
 
     def test_invalid_url(self):
         with self.assertRaises(ValueError):
@@ -116,7 +114,6 @@ class TestWeTransferFetcherFactory(unittest.TestCase):
 class TestMergeVariables(unittest.TestCase):
     def test_merge_skip_none(self):
         from httprunner.utils import merge_variables
-        # when step provides None but session already has value, keep existing
+
         self.assertEqual(merge_variables({"foo": None}, {"foo": "bar"}), {"foo": "bar"})
-        # when session has no value, None is preserved so parser sees a defined key
         self.assertEqual(merge_variables({"foo": None}, {}), {"foo": None})

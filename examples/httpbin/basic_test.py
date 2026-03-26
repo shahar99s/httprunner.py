@@ -3,11 +3,11 @@
 from httprunner import HttpRunner, Config, Step, RunRequest
 
 
-class TestCaseBasic(HttpRunner):
+class WorkflowBasic(HttpRunner):
 
-    config = Config("basic test with httpbin").base_url("${get_httpbin_server()}")
+    config = Config("basic workflow with httpbin").base_url("${get_httpbin_server()}")
 
-    teststeps = [
+    steps = [
         Step(
             RunRequest("headers")
             .get("/headers")
@@ -39,7 +39,7 @@ class TestCaseBasic(HttpRunner):
         Step(
             RunRequest("get with params in params field")
             .get("/get")
-            .with_params(**{"a": 1, "b": 2})
+            .params(**{"a": 1, "b": 2})
             .validate()
             .assert_equal("status_code", 200)
             .assert_equal("body.args", {"a": "1", "b": "2"})
@@ -61,8 +61,8 @@ class TestCaseBasic(HttpRunner):
         Step(
             RunRequest("post data")
             .post("/post")
-            .with_headers(**{"Content-Type": "application/json"})
-            .with_data("abc")
+            .headers(**{"Content-Type": "application/json"})
+            .data("abc")
             .validate()
             .assert_equal("status_code", 200)
         ),
@@ -76,4 +76,4 @@ class TestCaseBasic(HttpRunner):
 
 
 if __name__ == "__main__":
-    TestCaseBasic().test_start()
+    WorkflowBasic().run()

@@ -4,7 +4,7 @@ config:
     verify: False
     export: ["cookie_foo1"]
 
-teststeps:
+steps:
 -
     name: set cookie foo1 & foo2 & foo3
     request:

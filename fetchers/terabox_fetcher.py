@@ -30,13 +30,18 @@ class TeraBoxFetcherFactory:
         "1024tera.com",
     }
 
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        parsed = urlparse(url)
+        return parsed.netloc in cls.VALID_HOSTS and parsed.path.startswith("/s/")
+
     def __init__(self, link: str, headers: Dict[str, str] | None = None):
+        if not self.is_relevant_url(link):
+            raise ValueError("Error: No valid TeraBox URL provided")
         self.link = link
         self.headers = headers or {}
 
         parsed = urlparse(link)
-        if parsed.netloc not in self.VALID_HOSTS or not parsed.path.startswith("/s/"):
-            raise ValueError("Error: No valid TeraBox URL provided")
 
         self.shorturl = parsed.path.split("/s/")[1].rstrip("/")
         self.surl = self.shorturl[1:] if self.shorturl.startswith("1") else self.shorturl
@@ -427,7 +432,7 @@ class TeraBoxFetcherFactory:
                     "direct_link": dlink,
                 }
 
-            def extend_metadata_with_download(self, metadata: dict, download_item: dict, download_status: dict) -> dict:
+            def extend_metadata_download(self, metadata: dict, download_item: dict, download_status: dict) -> dict:
                 updated = dict(metadata)
                 updated["download_errno"] = download_item.get("errno")
                 updated["download_error"] = download_item.get("errmsg")
@@ -438,7 +443,7 @@ class TeraBoxFetcherFactory:
                 updated["download_source"] = download_status.get("source") or "native"
                 return updated
 
-            def extend_metadata_with_proxy(self, metadata: dict, proxy_result: dict, download_status: dict) -> dict:
+            def extend_metadata_proxy(self, metadata: dict, proxy_result: dict, download_status: dict) -> dict:
                 updated = dict(metadata)
                 file_info = proxy_result.get("file") or {}
                 payload = proxy_result.get("payload") or {}
@@ -490,20 +495,17 @@ class TeraBoxFetcherFactory:
                 Step(
                     RunRequest("load share page")
                     .get(share_page_path)
-                    .with_headers(**request_headers)
-                    .teardown_hook("${apply_extracted_cookies($response)}", "auth_cookie")
-                    .teardown_hook("${extract_js_token($response)}", "js_token")
-                    .extract()
-                    .with_jmespath("$js_token", "js_token")
-                    .with_jmespath("$auth_cookie", "auth_cookie")
+                    .headers(**request_headers)
+                    .teardown_callback("apply_extracted_cookies(response)", assign="auth_cookie")
+                    .teardown_callback("extract_js_token(response)", assign="js_token")
                     .validate()
                     .assert_equal("status_code", 200)
                 ),
                 Step(
                     RunRequest("load share metadata")
                     .get("/api/shorturlinfo")
-                    .with_headers(**request_headers)
-                    .with_params(
+                    .headers(**request_headers)
+                    .params(
                         app_id="250528",
                         web="1",
                         channel="dubox",
@@ -513,22 +515,15 @@ class TeraBoxFetcherFactory:
                         root="1",
                         scene="",
                     )
-                    .teardown_hook("${extract_file_list($response)}", "file_list")
-                    .teardown_hook("${extract_metadata($response, $file_list)}", "metadata")
-                    .teardown_hook("${extract_filename($metadata)}", "filename")
-                    .teardown_hook("${default_downloads_count()}", "downloads_count")
-                    .teardown_hook("${is_available($file_list)}", "available")
-                    .teardown_hook("${log_fetch_state($metadata, $downloads_count)}")
-                    .extract()
-                    .with_jmespath("$js_token", "js_token")
-                    .with_jmespath("$file_list", "file_list")
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("$filename", "filename")
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$available", "available")
+                    .teardown_callback("extract_file_list(response)", assign="file_list")
+                    .teardown_callback("extract_metadata(response, file_list)", assign="metadata")
+                    .teardown_callback("extract_filename(metadata)", assign="filename")
+                    .teardown_callback("default_downloads_count()", assign="downloads_count")
+                    .teardown_callback("is_available(file_list)", assign="available")
+                    .teardown_callback("log_fetch_state(metadata, downloads_count)")
                     .validate()
                     .assert_equal("status_code", 200)
-                    .assert_equal("$available", True)
+                    .assert_equal("available", True)
                 ),
             ]
 
@@ -538,32 +533,14 @@ class TeraBoxFetcherFactory:
                     OptionalStep(
                         RunRequest("load gateway direct link")
                         .get(proxy_request_url or "https://invalid.local/api2")
-                        .with_headers(**proxy_headers)
-                        .with_params(url=link)
-                        .teardown_hook(
-                            "${extract_proxy_result($response)}",
-                            "proxy_result",
-                        )
-                        .teardown_hook(
-                            "${extract_proxy_direct_link($proxy_result)}",
-                            "direct_link",
-                        )
-                        .teardown_hook(
-                            "${extract_proxy_download_status($proxy_result)}",
-                            "download_status",
-                        )
-                        .teardown_hook(
-                            "${extend_metadata_with_proxy($metadata, $proxy_result, $download_status)}",
-                            "metadata",
-                        )
-                        .teardown_hook("${extract_filename($metadata)}", "filename")
-                        .teardown_hook("${log_proxy_resolution($proxy_result, $download_status)}")
-                        .extract()
-                        .with_jmespath("$direct_link", "direct_link")
-                        .with_jmespath("$proxy_result", "proxy_result")
-                        .with_jmespath("$download_status", "download_status")
-                        .with_jmespath("$metadata", "metadata")
-                        .with_jmespath("$filename", "filename")
+                        .headers(**proxy_headers)
+                        .params(url=link)
+                        .teardown_callback("extract_proxy_result(response)", assign="proxy_result")
+                        .teardown_callback("extract_proxy_direct_link(proxy_result)", assign="direct_link")
+                        .teardown_callback("extract_proxy_download_status(proxy_result)", assign="download_status")
+                        .teardown_callback("extend_metadata_proxy(metadata, proxy_result, download_status)", assign="metadata")
+                        .teardown_callback("extract_filename(metadata)", assign="filename")
+                        .teardown_callback("log_proxy_resolution(proxy_result, download_status)")
                     ).when(
                         lambda step, vars: (
                             mode != Mode.INFO and vars.get("available") is True and proxy_mode == "api2"
@@ -572,32 +549,14 @@ class TeraBoxFetcherFactory:
                     OptionalStep(
                         RunRequest("load worker direct link")
                         .get(proxy_request_url or "https://invalid.local/")
-                        .with_headers(**proxy_headers)
-                        .with_params(mode="resolve", surl=surl, raw="1")
-                        .teardown_hook(
-                            "${extract_worker_proxy_result($response)}",
-                            "proxy_result",
-                        )
-                        .teardown_hook(
-                            "${extract_proxy_direct_link($proxy_result)}",
-                            "direct_link",
-                        )
-                        .teardown_hook(
-                            "${extract_proxy_download_status($proxy_result)}",
-                            "download_status",
-                        )
-                        .teardown_hook(
-                            "${extend_metadata_with_proxy($metadata, $proxy_result, $download_status)}",
-                            "metadata",
-                        )
-                        .teardown_hook("${extract_filename($metadata)}", "filename")
-                        .teardown_hook("${log_proxy_resolution($proxy_result, $download_status)}")
-                        .extract()
-                        .with_jmespath("$direct_link", "direct_link")
-                        .with_jmespath("$proxy_result", "proxy_result")
-                        .with_jmespath("$download_status", "download_status")
-                        .with_jmespath("$metadata", "metadata")
-                        .with_jmespath("$filename", "filename")
+                        .headers(**proxy_headers)
+                        .params(mode="resolve", surl=surl, raw="1")
+                        .teardown_callback("extract_worker_proxy_result(response)", assign="proxy_result")
+                        .teardown_callback("extract_proxy_direct_link(proxy_result)", assign="direct_link")
+                        .teardown_callback("extract_proxy_download_status(proxy_result)", assign="download_status")
+                        .teardown_callback("extend_metadata_proxy(metadata, proxy_result, download_status)", assign="metadata")
+                        .teardown_callback("extract_filename(metadata)", assign="filename")
+                        .teardown_callback("log_proxy_resolution(proxy_result, download_status)")
                     ).when(
                         lambda step, vars: (
                             mode != Mode.INFO and vars.get("available") is True and proxy_mode == "worker"
@@ -606,47 +565,38 @@ class TeraBoxFetcherFactory:
                     OptionalStep(
                         RunRequest("load shared download link")
                         .get("/api/sharedownload")
-                        .with_headers(**sharedownload_headers)
-                        .with_params(
+                        .setup_hook(lambda v: v.update({
+                            "download_sign": v["self"].get_download_sign(v["metadata"]),
+                            "download_timestamp": v["self"].get_download_timestamp(v["metadata"]),
+                            "share_id": v["self"].get_share_id(v["metadata"]),
+                            "share_uk": v["self"].get_share_uk(v["metadata"]),
+                            "fid_list": v["self"].build_fid_list(v["metadata"]),
+                            "download_extra": v["self"].build_download_extra(v["metadata"]),
+                        }))
+                        .headers(**sharedownload_headers)
+                        .params(
                             app_id="250528",
                             web="1",
                             channel="dubox",
                             clienttype="0",
                             jsToken="$js_token",
                             shorturl=shorturl,
-                            sign="${get_download_sign($metadata)}",
-                            timestamp="${get_download_timestamp($metadata)}",
-                            shareid="${get_share_id($metadata)}",
-                            primaryid="${get_share_id($metadata)}",
-                            uk="${get_share_uk($metadata)}",
-                            fid_list="${build_fid_list($metadata)}",
+                            sign="$download_sign",
+                            timestamp="$download_timestamp",
+                            shareid="$share_id",
+                            primaryid="$share_id",
+                            uk="$share_uk",
+                            fid_list="$fid_list",
                             product="share",
                             type="nolimit",
                             nozip="0",
-                            extra="${build_download_extra($metadata)}",
+                            extra="$download_extra",
                         )
-                        .teardown_hook(
-                            "${extract_sharedownload_item($response)}",
-                            "download_item",
-                        )
-                        .teardown_hook(
-                            "${extract_direct_link($download_item)}",
-                            "direct_link",
-                        )
-                        .teardown_hook(
-                            "${extract_download_status($download_item)}",
-                            "download_status",
-                        )
-                        .teardown_hook(
-                            "${extend_metadata_with_download($metadata, $download_item, $download_status)}",
-                            "metadata",
-                        )
-                        .teardown_hook("${log_download_negotiation($download_item, $download_status)}")
-                        .extract()
-                        .with_jmespath("$download_item", "download_item")
-                        .with_jmespath("$direct_link", "direct_link")
-                        .with_jmespath("$download_status", "download_status")
-                        .with_jmespath("$metadata", "metadata")
+                        .teardown_callback("extract_sharedownload_item(response)", assign="download_item")
+                        .teardown_callback("extract_direct_link(download_item)", assign="direct_link")
+                        .teardown_callback("extract_download_status(download_item)", assign="download_status")
+                        .teardown_callback("extend_metadata_download(metadata, download_item, download_status)", assign="metadata")
+                        .teardown_callback("log_download_negotiation(download_item, download_status)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(
@@ -659,8 +609,8 @@ class TeraBoxFetcherFactory:
                     OptionalStep(
                         RunRequest("download")
                         .get("$direct_link")
-                        .with_headers(**download_headers)
-                        .teardown_hook("${save_file($response, $filename)}")
+                        .headers(**download_headers)
+                        .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(
@@ -675,6 +625,6 @@ class TeraBoxFetcherFactory:
                 ]
             )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+            steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return TeraBoxFetcher()

@@ -4,7 +4,16 @@ import os
 import unittest
 from pathlib import Path
 
-import toml
+try:
+    import tomllib
+
+    def _toml_loads(content):
+        return tomllib.loads(content)
+except ModuleNotFoundError:
+    import toml
+
+    def _toml_loads(content):
+        return toml.loads(content)
 
 from httprunner import __version__, loader, utils
 from httprunner.utils import ExtendJSONEncoder, merge_variables
@@ -127,6 +136,14 @@ class TestUtils(unittest.TestCase):
             {"base_url": "https://postman-echo.com", "foo1": "bar1"},
         )
 
+    def test_override_config_variables_braced_reference(self):
+        step_variables = {"base_url": "${base_url}", "foo1": "bar1"}
+        config_variables = {"base_url": "https://postman-echo.com", "foo1": "bar111"}
+        self.assertEqual(
+            merge_variables(step_variables, config_variables),
+            {"base_url": "https://postman-echo.com", "foo1": "bar1"},
+        )
+
     def test_cartesian_product_one(self):
         parameters_content_list = [[{"a": 1}, {"a": 2}]]
         product_list = utils.gen_cartesian_product(*parameters_content_list)
@@ -157,6 +174,6 @@ class TestUtils(unittest.TestCase):
         """Checks if the pyproject.toml and __version__ in __init__.py are in sync."""
 
         path = Path(__file__).resolve().parents[1] / "pyproject.toml"
-        pyproject = toml.loads(open(str(path)).read())
+        pyproject = _toml_loads(path.read_text(encoding="utf-8"))
         pyproject_version = pyproject["tool"]["poetry"]["version"]
         self.assertEqual(pyproject_version, __version__)

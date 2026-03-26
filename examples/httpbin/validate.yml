@@ -1,8 +1,8 @@
 config:
-    name: basic test with httpbin
+    name: basic workflow with httpbin
     base_url: ${get_httpbin_server()}
 
-teststeps:
+steps:
 -
     name: validate response with json path
     request:

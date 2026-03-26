@@ -16,19 +16,22 @@ class FilemailFetcherFactory:
     has downloads count: Yes
     """
 
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        parsed = urlparse(url)
+        return "filemail.com" in parsed.netloc and parsed.path.startswith("/d/")
+
     def __init__(
         self,
         link: str,
         password: str | None = None,
         headers: Dict[str, str] | None = None,
     ):
+        if not self.is_relevant_url(link):
+            raise ValueError("Error: No valid Filemail URL provided")
         self.link = link
         self.password = password
         self.headers = headers or {}
-
-        parsed = urlparse(link)
-        if "filemail.com" not in parsed.netloc or not parsed.path.startswith("/d/"):
-            raise ValueError("Error: No valid Filemail URL provided")
 
     def create(self, mode: Mode = Mode.FETCH) -> BaseFetcher:
         link = self.link
@@ -151,29 +154,19 @@ class FilemailFetcherFactory:
                 Step(
                     RunRequest("resolve transfer")
                     .post("/transfer/find")
-                    .with_headers(**request_headers)
-                    .with_json("${build_lookup_payload()}")
-                    .teardown_hook("${extract_data($response)}", "transfer")
-                    .teardown_hook("${extract_metadata($response)}", "metadata")
-                    .teardown_hook("${extract_primary_file($response)}", "primary_file")
-                    .teardown_hook("${extract_filename($response)}", "filename")
-                    .teardown_hook("${extract_direct_link($response)}", "direct_link")
-                    .teardown_hook("${is_available($response)}", "available")
-                    .teardown_hook("${extract_downloads_count($metadata)}", "downloads_count")
-                    .teardown_hook(
-                        "${log_fetch_state($metadata, $downloads_count, $filename, $primary_file, $transfer)}"
-                    )
-                    .extract()
-                    .with_jmespath("$transfer", "transfer")
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$primary_file", "primary_file")
-                    .with_jmespath("$filename", "filename")
-                    .with_jmespath("$direct_link", "direct_link")
-                    .with_jmespath("$available", "available")
+                    .headers(**request_headers)
+                    .json(lambda v: v["self"].build_lookup_payload())
+                    .teardown_callback("extract_data(response)", assign="transfer")
+                    .teardown_callback("extract_metadata(response)", assign="metadata")
+                    .teardown_callback("extract_primary_file(response)", assign="primary_file")
+                    .teardown_callback("extract_filename(response)", assign="filename")
+                    .teardown_callback("extract_direct_link(response)", assign="direct_link")
+                    .teardown_callback("is_available(response)", assign="available")
+                    .teardown_callback("extract_downloads_count(metadata)", assign="downloads_count")
+                    .teardown_callback("log_fetch_state(metadata, downloads_count, filename, primary_file, transfer)")
                     .validate()
                     .assert_equal("status_code", 200)
-                    .assert_equal("$available", True)
+                    .assert_equal("available", True)
                 )
             ]
             fetch_steps = info_steps.copy()
@@ -182,14 +175,14 @@ class FilemailFetcherFactory:
                     OptionalStep(
                         RunRequest("download")
                         .get("$direct_link")
-                        .with_headers(**self.headers)
-                        .teardown_hook("${save_file($response, $filename)}")
+                        .headers(**self.headers)
+                        .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, vars.get("downloads_count")))
                 ]
             )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+            steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return FilemailFetcher()

@@ -1,11 +1,11 @@
 config:
-    name: "request methods testcase: validate with functions"
+    name: "request methods workflow: validate with functions"
     variables:
         foo1: session_bar1
     base_url: "https://postman-echo.com"
     verify: False
 
-teststeps:
+steps:
 -
     name: get with params
     variables:

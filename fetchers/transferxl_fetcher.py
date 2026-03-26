@@ -22,19 +22,19 @@ class TransferXLFetcherFactory:
 
     URL_PATTERN = re.compile(r"/download/([0-9A-Fa-f]{2}[a-zA-Z0-9]+)")
 
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        parsed = urlparse(url)
+        return "transferxl.com" in parsed.netloc and bool(cls.URL_PATTERN.search(parsed.path))
+
     def __init__(self, link: str, headers: Dict[str, str] | None = None):
+        if not self.is_relevant_url(link):
+            raise ValueError("Error: No valid TransferXL URL provided")
         self.link = link
         self.headers = headers or {}
 
         parsed = urlparse(link)
-        if "transferxl.com" not in parsed.netloc:
-            raise ValueError("Error: No valid TransferXL URL provided")
-
-        m = self.URL_PATTERN.search(parsed.path)
-        if not m:
-            raise ValueError("Error: No valid TransferXL URL provided")
-
-        self.transfer_id = m.group(1)
+        self.transfer_id = self.URL_PATTERN.search(parsed.path).group(1)
 
     def create(self, mode: Mode = Mode.FETCH) -> BaseFetcher:
         link = self.link
@@ -144,21 +144,16 @@ class TransferXLFetcherFactory:
                 Step(
                     RunRequest("load transfer metadata")
                     .get("/history/download")
-                    .with_headers(**request_headers)
-                    .with_params(shortUrl=transfer_id, perFilePendingStatus="true", language="en")
-                    .teardown_hook("${extract_metadata($response)}", "metadata")
-                    .teardown_hook("${extract_filename($metadata)}", "filename")
-                    .teardown_hook("${extract_downloads_count($metadata)}", "downloads_count")
-                    .teardown_hook("${is_available($metadata)}", "available")
-                    .teardown_hook("${log_fetch_state($metadata, $downloads_count)}")
-                    .extract()
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("$filename", "filename")
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$available", "available")
+                    .headers(**request_headers)
+                    .params(shortUrl=transfer_id, perFilePendingStatus="true", language="en")
+                    .teardown_callback("extract_metadata(response)", assign="metadata")
+                    .teardown_callback("extract_filename(metadata)", assign="filename")
+                    .teardown_callback("extract_downloads_count(metadata)", assign="downloads_count")
+                    .teardown_callback("is_available(metadata)", assign="available")
+                    .teardown_callback("log_fetch_state(metadata, downloads_count)")
                     .validate()
                     .assert_equal("status_code", 200)
-                    .assert_equal("$available", True)
+                    .assert_equal("available", True)
                 )
             ]
 
@@ -168,28 +163,23 @@ class TransferXLFetcherFactory:
                     OptionalStep(
                         RunRequest("create download token")
                         .post("/download/getToken")
-                        .with_headers(**request_headers)
-                        .with_json({"shortUrl": transfer_id})
-                        .teardown_hook(
-                            "${extract_direct_link($metadata, $response)}",
-                            "direct_link",
-                        )
-                        .extract()
-                        .with_jmespath("$direct_link", "direct_link")
+                        .headers(**request_headers)
+                        .json({"shortUrl": transfer_id})
+                        .teardown_callback("extract_direct_link(metadata, response)", assign="direct_link")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: (mode != Mode.INFO and vars.get("available") is True)),
                     OptionalStep(
                         RunRequest("download")
                         .get("$direct_link")
-                        .with_headers(**request_headers)
-                        .teardown_hook("${save_file($response, $filename)}")
+                        .headers(**request_headers)
+                        .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: (mode != Mode.INFO and vars.get("available") is True)),
                 ]
             )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+            steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return TransferXLFetcher()

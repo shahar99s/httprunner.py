@@ -52,17 +52,21 @@ class MegaFetcherFactory:
     note: Transfer.it isn't tested
     """
 
+    URL_PATTERN = re.compile(
+        r"https?://mega\.nz/(?:file/(?P<file_id>[A-Za-z0-9_-]+)#(?P<key>[A-Za-z0-9_-]+)|#!(?P<legacy_file_id>[A-Za-z0-9_-]+)!(?P<legacy_key>[A-Za-z0-9_-]+))"
+    )
+
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        return bool(cls.URL_PATTERN.match(url))
+
     def __init__(self, link: str, headers: Dict[str, str] | None = None):
+        if not self.is_relevant_url(link):
+            raise ValueError("Error: No valid Mega URL provided")
         self.link = link
         self.headers = headers or {}
 
-        match = re.match(
-            r"https?://mega\.nz/(?:file/(?P<file_id>[A-Za-z0-9_-]+)#(?P<key>[A-Za-z0-9_-]+)|#!(?P<legacy_file_id>[A-Za-z0-9_-]+)!(?P<legacy_key>[A-Za-z0-9_-]+))",
-            link,
-        )
-        if not match:
-            raise ValueError("Error: No valid Mega URL provided")
-
+        match = self.URL_PATTERN.match(link)
         self.file_id = match.group("file_id") or match.group("legacy_file_id")
         self.file_key = match.group("key") or match.group("legacy_key")
 
@@ -193,51 +197,45 @@ class MegaFetcherFactory:
                 )
                 return output_path
 
-            info_steps = [
-                Step(
-                    RunRequest("get file metadata")
-                    .post("/cs")
-                    .with_params(id=0)
-                    .with_headers(**headers)
-                    .with_json("${build_file_info_payload()}")
-                    .teardown_hook("${extract_api_response($response)}", "api_response")
-                    .teardown_hook("${extract_metadata($api_response)}", "metadata")
-                    .teardown_hook("${extract_filename($api_response)}", "filename")
-                    .teardown_hook("${extract_download_url($api_response)}", "direct_link")
-                    .teardown_hook("${extract_size($api_response)}", "size")
-                    .teardown_hook("${default_downloads_count()}", "downloads_count")
-                    .teardown_hook("${is_available($api_response)}", "available")
-                    .teardown_hook("${log_fetch_state($metadata, $downloads_count)}")
-                    .extract()
-                    .with_jmespath("$api_response", "api_response")
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("$filename", "filename")
-                    .with_jmespath("$direct_link", "direct_link")
-                    .with_jmespath("$size", "size")
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$available", "available")
-                    .validate()
-                    .assert_equal("status_code", 200)
-                    .assert_equal("$available", True)
-                )
-            ]
-
-            fetch_steps = info_steps.copy()
-            fetch_steps.extend(
-                [
-                    OptionalStep(
-                        Step(
-                            RunRequest("download")
-                            .get("$direct_link")
-                            .with_headers(**headers)
-                            .teardown_hook("${save_public_file($response, $filename)}")
-                            .validate()
-                            .assert_equal("status_code", 200)
-                        )
-                    ).when(lambda step, vars: should_download(mode, vars.get("downloads_count")))
+            def __init__(self):
+                super().__init__()
+                info_steps = [
+                    Step(
+                        RunRequest("get file metadata")
+                        .post("/cs")
+                        .params(id=0)
+                        .headers(**headers)
+                        .json(self.build_file_info_payload)
+                        .teardown_callback("extract_api_response(response)", assign="api_response")
+                        .teardown_callback("extract_metadata(api_response)", assign="metadata")
+                        .teardown_callback("extract_filename(api_response)", assign="filename")
+                        .teardown_callback("extract_download_url(api_response)", assign="direct_link")
+                        .teardown_callback("extract_size(api_response)", assign="size")
+                        .teardown_callback("default_downloads_count()", assign="downloads_count")
+                        .teardown_callback("is_available(api_response)", assign="available")
+                        .teardown_callback("log_fetch_state(metadata, downloads_count)")
+                        .validate()
+                        .assert_equal("status_code", 200)
+                        .assert_equal("available", True)
+                    )
                 ]
-            )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+                fetch_steps = info_steps.copy()
+                fetch_steps.extend(
+                    [
+                        OptionalStep(
+                            Step(
+                                RunRequest("download")
+                                .get("$direct_link")
+                                .headers(**headers)
+                                .teardown_callback("save_public_file(response, filename)")
+                                .validate()
+                                .assert_equal("status_code", 200)
+                            )
+                        ).when(lambda step, vars: should_download(mode, vars.get("downloads_count")))
+                    ]
+                )
+
+                self.steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return MegaFetcher()

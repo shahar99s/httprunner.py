@@ -17,6 +17,10 @@ class WeTransferFetcherFactory:
     has downloads count: Yes
     """
 
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        return "wetransfer.com/downloads" in url or "we.tl/" in url
+
     @staticmethod
     def _parse_downloads_url(url: str) -> dict:
         """Return ``{transfer_id, security_hash[, recipient_id]}`` for a
@@ -45,12 +49,11 @@ class WeTransferFetcherFactory:
         password: str | None = None,
         headers: Dict[str, str] | None = None,
     ):
+        if not self.is_relevant_url(link):
+            raise ValueError("Error: No valid WeTransfer URL provided")
         self.link = link
         self.password = password
         self.headers = headers or {}
-
-        if not ("wetransfer.com/downloads" in link or "we.tl/" in link):
-            raise ValueError("Error: No valid WeTransfer URL provided")
 
     def create(self, mode: Mode = Mode.FETCH) -> BaseFetcher:
         """
@@ -145,10 +148,8 @@ class WeTransferFetcherFactory:
                     Step(
                         RunRequest("resolve short url")
                         .get(self.link)
-                        .with_headers(**self.headers)
-                        .teardown_hook("${get_url($response)}", "download_url")
-                        .extract()
-                        .with_jmespath("$download_url", "download_url")
+                        .headers(**self.headers)
+                        .teardown_callback("get_url(response)", assign="download_url")
                         .validate()
                         .assert_equal("status_code", 200)
                     )
@@ -157,23 +158,21 @@ class WeTransferFetcherFactory:
                 [
                     Step(
                         RunRequest("check transfer status")
-                        .with_variables(
-                            download_url="$download_url" if self._is_short_url() else self.link,
-                            transfer_id="${parse_link_transfer_id($download_url)}",
-                            security_hash="${parse_link_security_hash($download_url)}",
-                            recipient_id="${parse_link_recipient_id($download_url)}",
+                        .variables(
+                            download_url=(lambda v: v["download_url"]) if self._is_short_url() else self.link,
                         )
-                        .post("/api/v4/transfers/${transfer_id}/prepare-download")
-                        .with_headers(**{**self.headers, "x-requested-with": "XMLHttpRequest"})
-                        .with_json("${build_download_payload($security_hash, $recipient_id)}")
-                        .teardown_hook("${parse_metadata($response)}", "metadata")
-                        .teardown_hook("${extract_downloads_count($metadata)}", "downloads_count")
-                        .teardown_hook("${is_downloadable($metadata)}", "downloadable")
-                        .teardown_hook("${log_fetch_state($metadata, $downloads_count)}")
-                        .extract()
-                        .with_jmespath("$metadata", "metadata")
-                        .with_jmespath("$downloads_count", "downloads_count")
-                        .with_jmespath("$downloadable", "downloadable")
+                        .setup_hook(lambda v: v.update({
+                            "transfer_id": v["self"].parse_link_transfer_id(v["download_url"]),
+                            "security_hash": v["self"].parse_link_security_hash(v["download_url"]),
+                            "recipient_id": v["self"].parse_link_recipient_id(v["download_url"]),
+                        }))
+                        .post(lambda v: f"/api/v4/transfers/{v['transfer_id']}/prepare-download")
+                        .headers(**{**self.headers, "x-requested-with": "XMLHttpRequest"})
+                        .json(lambda v: v["self"].build_download_payload(v["security_hash"], v.get("recipient_id")))
+                        .teardown_callback("parse_metadata(response)", assign="metadata")
+                        .teardown_callback("extract_downloads_count(metadata)", assign="downloads_count")
+                        .teardown_callback("is_downloadable(metadata)", assign="downloadable")
+                        .teardown_callback("log_fetch_state(metadata, downloads_count)")
                         .validate()
                         .assert_equal("status_code", 200)
                         .assert_equal("downloadable", True)
@@ -186,30 +185,31 @@ class WeTransferFetcherFactory:
                     # NOTE: This step increases the downloads counter! Find how to bypass it
                     OptionalStep(
                         RunRequest("create direct link")
-                        .with_variables(
-                            download_url="$download_url" if self._is_short_url() else self.link,
-                            transfer_id="${parse_link_transfer_id($download_url)}",
-                            security_hash="${parse_link_security_hash($download_url)}",
-                            recipient_id="${parse_link_recipient_id($download_url)}",
+                        .variables(
+                            download_url=(lambda v: v["download_url"]) if self._is_short_url() else self.link,
                         )
-                        .post("/api/v4/transfers/${transfer_id}/download")
-                        .with_headers(**{**self.headers, "x-requested-with": "XMLHttpRequest"})
-                        .with_json("${build_download_payload($security_hash, $recipient_id)}")
-                        .extract()
-                        .with_jmespath("body.direct_link", "direct_link")
+                        .setup_hook(lambda v: v.update({
+                            "transfer_id": v["self"].parse_link_transfer_id(v["download_url"]),
+                            "security_hash": v["self"].parse_link_security_hash(v["download_url"]),
+                            "recipient_id": v["self"].parse_link_recipient_id(v["download_url"]),
+                        }))
+                        .post(lambda v: f"/api/v4/transfers/{v['transfer_id']}/download")
+                        .headers(**{**self.headers, "x-requested-with": "XMLHttpRequest"})
+                        .json(lambda v: v["self"].build_download_payload(v["security_hash"], v.get("recipient_id")))
+                        .teardown_callback("response.body['direct_link']", assign="direct_link")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, vars.get("downloads_count"))),
                     OptionalStep(
                         RunRequest("download")
                         .get("$direct_link")
-                        .with_headers(**self.headers)
-                        .teardown_hook("${save_file($response, $metadata)}")
+                        .headers(**self.headers)
+                        .teardown_callback("save_file(response, metadata)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, vars.get("downloads_count"))),
                 ]
             )
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+            steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return WeTransferFetcher()

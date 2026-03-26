@@ -46,8 +46,7 @@ import os
 import sys
 from typing import Text
 
-from httprunner.models import VariablesMapping, FunctionsMapping, TStep
-from httprunner.parser import parse_data
+from httprunner.models import VariablesMapping, TStep
 from loguru import logger
 
 try:
@@ -88,14 +87,12 @@ def ensure_upload_ready():
     sys.exit(1)
 
 
-def prepare_upload_step(
-    step: TStep, step_variables: VariablesMapping, functions: FunctionsMapping
-):
-    """preprocess for upload test
+def prepare_upload_step(step: TStep, step_variables: VariablesMapping, functions=None):
+    """preprocess for upload step
         replace `upload` info with MultipartEncoder
 
     Args:
-        step: teststep
+        step: step
             {
                 "variables": {},
                 "request": {
@@ -116,21 +113,16 @@ def prepare_upload_step(
     if not step.request.upload:
         return
 
-    # parse upload info
-    step.request.upload = parse_data(step.request.upload, step_variables, functions)
-
     ensure_upload_ready()
-    params_list = []
-    for key, value in step.request.upload.items():
+    upload_mapping = dict(step.request.upload)
+    for key, value in upload_mapping.items():
         step_variables[key] = value
-        params_list.append(f"{key}=${key}")
 
-    params_str = ", ".join(params_list)
-    step_variables["m_encoder"] = "${multipart_encoder(" + params_str + ")}"
-
-    step.request.headers["Content-Type"] = "${multipart_content_type($m_encoder)}"
-
-    step.request.data = "$m_encoder"
+    step_variables["m_encoder"] = multipart_encoder(**upload_mapping)
+    step.request.headers["Content-Type"] = multipart_content_type(
+        step_variables["m_encoder"]
+    )
+    step.request.data = step_variables["m_encoder"]
 
 
 def multipart_encoder(**kwargs):

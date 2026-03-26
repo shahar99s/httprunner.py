@@ -1,5 +1,5 @@
 config:
-    name: "request methods testcase with functions"
+    name: "request methods workflow with functions"
     variables:
         foo1: config_bar1
         foo2: config_bar2
@@ -10,7 +10,7 @@ config:
     weight: 2
     export: ["foo3"]
 
-teststeps:
+steps:
 -
     name: get with params
     variables:

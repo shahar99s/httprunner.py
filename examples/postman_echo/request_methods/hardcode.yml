@@ -1,9 +1,9 @@
 config:
-    name: "request methods testcase in hardcode"
+    name: "request methods workflow in hardcode"
     base_url: "https://postman-echo.com"
     verify: False
 
-teststeps:
+steps:
 -
     name: get with params
     request:

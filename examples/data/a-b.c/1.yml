@@ -1,12 +1,12 @@
 config:
-    name: "request methods testcase with functions"
+    name: "request methods workflow with functions"
     variables:
         foo1: config_bar1
         foo2: config_bar2
     base_url: "https://postman-echo.com"
     verify: False
 
-teststeps:
+steps:
 -
     name: get with params
     variables:

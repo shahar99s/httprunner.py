@@ -1,5 +1,5 @@
 """
-Built-in functions used in YAML/JSON testcases.
+Built-in functions used in YAML/JSON Workflows.
 """
 
 import datetime

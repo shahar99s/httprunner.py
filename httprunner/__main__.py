@@ -1,5 +1,1 @@
-from httprunner.cli import main
-
-
-if __name__ == "__main__":
-    main()
+# __main__.py — CLI entry point removed in simplification.

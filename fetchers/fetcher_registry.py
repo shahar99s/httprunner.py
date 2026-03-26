@@ -44,11 +44,10 @@ def _discover_factories() -> list[type]:
     return _FACTORIES
 
 
-def detect_provider(url: str) -> str | None:
-    """Return the provider name for a URL, or None if unrecognized."""
+def find_relevant_fetcher_factory(url: str) -> type | None:
     for factory_cls in _discover_factories():
-        fetcher = factory_cls(url).create(mode=Mode.INFO)
-        return fetcher.NAME
+        if factory_cls.is_relevant_url(url):
+            return factory_cls
     return None
 
 
@@ -57,11 +56,9 @@ def create_fetcher(
     headers: Dict[str, str] | None = None,
     mode: Mode = Mode.FETCH,
 ) -> BaseFetcher:
-    """Detect the provider from *url* and return a configured fetcher instance.
 
-    Raises ``ValueError`` if the URL doesn't match any known provider.
-    """
-    for factory_cls in _discover_factories():
+    factory_cls = find_relevant_fetcher_factory(url)
+    if factory_cls:
         factory = factory_cls(url, headers=headers)
         return factory.create(mode=mode)
     raise ValueError(f"Error: No supported provider detected for URL: {url}")

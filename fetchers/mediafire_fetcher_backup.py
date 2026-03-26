@@ -29,7 +29,7 @@ class MediaFireFetcherFactory:
         else:
             self.file_key = self.link
 
-        # User login credentials for copy-then-download bypass (env vars)
+        # User login credentials for copy-teardown_callback-download bypass (env vars)
         self.email = os.getenv("MEDIAFIRE_EMAIL", "").strip()
         self.password = os.getenv("MEDIAFIRE_PASSWORD", "").strip()
         self.app_id = os.getenv("MEDIAFIRE_APP_ID", "42511").strip()
@@ -40,7 +40,7 @@ class MediaFireFetcherFactory:
         mode: Mode.INFO (only info_steps), Mode.FETCH (full fetch_steps)
 
         If MEDIAFIRE_EMAIL and MEDIAFIRE_PASSWORD env vars are set, the fetcher
-        will log in, copy the file to the authenticated user's account, and then
+        will log in, copy the file to the authenticated user's account, and teardown_callback
         download from the user's own copy. This bypasses the public download
         counter on the original file.
         """
@@ -112,21 +112,18 @@ class MediaFireFetcherFactory:
                 Step(
                     RunRequest("info")
                     .post("/api/1.5/file/get_info.php")
-                    .with_headers(**self.headers)
-                    .with_params(
+                    .headers(**self.headers)
+                    .params(
                         **{
                             "recursive": "yes",
                             "quick_key": self.file_key,
                             "response_format": "json",
                         }
                     )
-                    .teardown_hook("${extract_metadata($response)}", "metadata")
-                    .teardown_hook("${default_downloads_count()}", "downloads_count")
-                    .teardown_hook("${log_fetch_state($metadata, $downloads_count)}")
-                    .extract()
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("body.response.file_info.filename", "filename")
-                    .with_jmespath("$downloads_count", "downloads_count")
+                    .teardown_callback("extract_metadata(response)", assign="metadata")
+                    .teardown_callback("default_downloads_count()", assign="downloads_count")
+                    .teardown_callback("log_fetch_state(metadata, downloads_count)")
+                    .teardown_callback("response.json['response']['file_info']['filename']", assign="filename")
                     .validate()
                     .assert_equal("status_code", 200)
                     .assert_equal("body.response.file_info.password_protected", "no")
@@ -142,8 +139,8 @@ class MediaFireFetcherFactory:
                     OptionalStep(
                         RunRequest("login")
                         .post("/api/1.5/user/get_session_token.php")
-                        .with_headers(**self.headers)
-                        .with_params(
+                        .headers(**self.headers)
+                        .params(
                             **{
                                 "email": email,
                                 "password": password,
@@ -152,9 +149,7 @@ class MediaFireFetcherFactory:
                                 "response_format": "json",
                             }
                         )
-                        .teardown_hook("${extract_session_token($response)}", "session_token")
-                        .extract()
-                        .with_jmespath("$session_token", "session_token")
+                        .teardown_callback("extract_session_token(response)", assign="session_token")
                         .validate()
                         .assert_equal("status_code", 200)
                         .assert_equal("body.response.result", "Success")
@@ -162,8 +157,8 @@ class MediaFireFetcherFactory:
                     OptionalStep(
                         RunRequest("copy file to user account")
                         .post("/api/1.5/file/copy.php")
-                        .with_headers(**self.headers)
-                        .with_params(
+                        .headers(**self.headers)
+                        .params(
                             **{
                                 "session_token": "$session_token",
                                 "quick_key": file_key,
@@ -171,9 +166,7 @@ class MediaFireFetcherFactory:
                                 "response_format": "json",
                             }
                         )
-                        .teardown_hook("${extract_copy_quick_key($response)}", "copy_quick_key")
-                        .extract()
-                        .with_jmespath("$copy_quick_key", "copy_quick_key")
+                        .teardown_callback("extract_copy_quick_key(response)", assign="copy_quick_key")
                         .validate()
                         .assert_equal("status_code", 200)
                         .assert_equal("body.response.result", "Success")
@@ -181,8 +174,8 @@ class MediaFireFetcherFactory:
                     OptionalStep(
                         RunRequest("get copy direct link")
                         .post("/api/1.5/file/get_links.php")
-                        .with_headers(**self.headers)
-                        .with_params(
+                        .headers(**self.headers)
+                        .params(
                             **{
                                 "session_token": "$session_token",
                                 "quick_key": "$copy_quick_key",
@@ -190,12 +183,7 @@ class MediaFireFetcherFactory:
                                 "response_format": "json",
                             }
                         )
-                        .teardown_hook(
-                            "${extract_copy_direct_link($response)}",
-                            "direct_download_link",
-                        )
-                        .extract()
-                        .with_jmespath("$direct_download_link", "direct_download_link")
+                        .teardown_callback("extract_copy_direct_link(response)", assign="direct_download_link")
                         .validate()
                         .assert_equal("status_code", 200)
                         .assert_equal("body.response.result", "Success")
@@ -203,8 +191,8 @@ class MediaFireFetcherFactory:
                     OptionalStep(
                         RunRequest("download (user copy)")
                         .get("$direct_download_link")
-                        .with_headers(**self.headers)
-                        .teardown_hook("${save_file($response, $filename)}")
+                        .headers(**self.headers)
+                        .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, vars.get("downloads_count"))),
@@ -218,21 +206,16 @@ class MediaFireFetcherFactory:
                     OptionalStep(
                         RunRequest("get direct link")
                         .get("/file/{}".format(self.file_key))
-                        .with_headers(**self.headers)
-                        .teardown_hook(
-                            "${extract_direct_download_link($response)}",
-                            "direct_download_link",
-                        )
-                        .extract()
-                        .with_jmespath("$direct_download_link", "direct_download_link")
+                        .headers(**self.headers)
+                        .teardown_callback("extract_direct_download_link(response)", assign="direct_download_link")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, vars.get("downloads_count"))),
                     OptionalStep(
                         RunRequest("download link")
                         .get("$direct_download_link")
-                        .with_headers(**self.headers)
-                        .teardown_hook("${save_file($response, $filename)}")
+                        .headers(**self.headers)
+                        .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, vars.get("downloads_count"))),
@@ -240,10 +223,10 @@ class MediaFireFetcherFactory:
             )
 
             if mode == Mode.INFO:
-                teststeps = info_steps
+                steps = info_steps
             elif has_credentials:
-                teststeps = auth_fetch_steps
+                steps = auth_fetch_steps
             else:
-                teststeps = public_fetch_steps
+                steps = public_fetch_steps
 
         return MediaFireFetcher()

@@ -16,18 +16,23 @@ class DropboxTransferFetcherFactory:
     note: DocSend links are has viewing and downloading notifications
     """
 
-    def __init__(self, link: str, headers: Dict[str, str] | None = None):
-        self.link = link
-        self.headers = headers or {}
-
-        parsed = urlparse(link)
-        if "dropbox.com" not in parsed.netloc or not (
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        parsed = urlparse(url)
+        return "dropbox.com" in parsed.netloc and (
             parsed.path.startswith("/t/")
             or parsed.path.startswith("/s/")
             or parsed.path.startswith("/l/scl/")
             or parsed.path.startswith("/scl/")
-        ):
+        )
+
+    def __init__(self, link: str, headers: Dict[str, str] | None = None):
+        if not self.is_relevant_url(link):
             raise ValueError("Error: No valid Dropbox Transfer URL provided")
+        self.link = link
+        self.headers = headers or {}
+
+        parsed = urlparse(link)
 
         # Build the direct-download URL by setting dl=1
         qs = parse_qs(parsed.query)
@@ -106,20 +111,15 @@ class DropboxTransferFetcherFactory:
                 Step(
                     RunRequest("get file metadata")
                     .head(direct_link)
-                    .with_headers(**request_headers)
-                    .teardown_hook("${extract_metadata($response)}", "metadata")
-                    .teardown_hook("${extract_filename($metadata)}", "filename")
-                    .teardown_hook("${default_downloads_count()}", "downloads_count")
-                    .teardown_hook("${is_available($metadata)}", "available")
-                    .teardown_hook("${log_fetch_state($metadata, $downloads_count)}")
-                    .extract()
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("$filename", "filename")
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$available", "available")
+                    .headers(**request_headers)
+                    .teardown_callback("extract_metadata(response)", assign="metadata")
+                    .teardown_callback("extract_filename(metadata)", assign="filename")
+                    .teardown_callback("default_downloads_count()", assign="downloads_count")
+                    .teardown_callback("is_available(metadata)", assign="available")
+                    .teardown_callback("log_fetch_state(metadata, downloads_count)")
                     .validate()
                     .assert_equal("status_code", 200)
-                    .assert_equal("$available", True)
+                    .assert_equal("available", True)
                 )
             ]
 
@@ -129,14 +129,14 @@ class DropboxTransferFetcherFactory:
                     OptionalStep(
                         RunRequest("download")
                         .get(direct_link)
-                        .with_headers(**request_headers)
-                        .teardown_hook("${save_file($response, $filename)}")
+                        .headers(**request_headers)
+                        .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: should_download(mode, 1))
                 ]
             )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+            steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return DropboxTransferFetcher()

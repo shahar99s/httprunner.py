@@ -19,14 +19,20 @@ class SmashFetcherFactory:
           Download is skipped when transfer has download notifications enabled.
     """
 
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        parsed = urlparse(url)
+        normalized_path = parsed.path.rstrip("/")
+        return "fromsmash.com" in parsed.netloc and normalized_path not in {"", "/"}
+
     def __init__(self_factory, link: str, headers: Dict[str, str] | None = None):
+        if not self_factory.is_relevant_url(link):
+            raise ValueError("Error: No valid Smash URL provided")
         self_factory.link = link
         self_factory.headers = headers or {}
 
         parsed = urlparse(link)
         normalized_path = parsed.path.rstrip("/")
-        if "fromsmash.com" not in parsed.netloc or normalized_path in {"", "/"}:
-            raise ValueError("Error: No valid Smash URL provided")
 
         query_params = parse_qs(parsed.query)
         self_factory.identity_token = query_params.get("e", [None])[0]
@@ -172,105 +178,87 @@ class SmashFetcherFactory:
             def is_available(self, metadata: dict) -> bool:
                 return metadata.get("state") == "available" and bool(metadata.get("download_url"))
 
-            info_steps = [
-                Step(
-                    RunRequest("discover Smash public service endpoint")
-                    .get("https://discovery.fromsmash.co/namespace/public/services")
-                    .with_headers(**self_factory.headers)
-                    .with_params(version="10-2019")
-                    .teardown_hook("${extract_region($response)}", "region")
-                    .extract()
-                    .with_jmespath("$region", "region")
-                    .validate()
-                    .assert_equal("status_code", 200)
-                ),
-                Step(
-                    RunRequest("create anonymous Smash account")
-                    .post("https://iam.$region.fromsmash.co/account")
-                    .with_headers(**self_factory.headers)
-                    .with_json({})
-                    .teardown_hook("${extract_account_token($response)}", "account_token")
-                    .extract()
-                    .with_jmespath("$account_token", "account_token")
-                    .validate()
-                    .assert_equal("status_code", 201)
-                ),
-                Step(
-                    RunRequest("resolve Smash transfer target")
-                    .get(f"https://link.fromsmash.co/target/{self_factory.encoded_target_id}")
-                    .with_headers(**self_factory.headers, Authorization="Bearer $account_token")
-                    .with_params(version="10-2019")
-                    .teardown_hook("${extract_target($response)}", "target")
-                    .teardown_hook("${extract_transfer_region($target)}", "transfer_region")
-                    .teardown_hook("${extract_transfer_id($target)}", "public_transfer_id")
-                    .extract()
-                    .with_jmespath("$target", "target")
-                    .with_jmespath("$transfer_region", "transfer_region")
-                    .with_jmespath("$public_transfer_id", "public_transfer_id")
-                    .validate()
-                    .assert_equal("status_code", 200)
-                ),
-                Step(
-                    RunRequest("load Smash transfer preview")
-                    .get("https://transfer.$transfer_region.fromsmash.co/transfer/$public_transfer_id/preview")
-                    .with_headers(**self_factory.headers, Authorization="Bearer $account_token")
-                    .with_params(version="01-2024", e=self_factory.identity_token)
-                    .teardown_hook(
-                        "${extract_metadata($response, $target)}",
-                        "transfer_metadata",
-                    )
-                    .teardown_hook("${default_downloads_count()}", "downloads_count")
-                    .teardown_hook("${extract_download_url($transfer_metadata)}", "download_url")
-                    .teardown_hook("${is_available($transfer_metadata)}", "available")
-                    .extract()
-                    .with_jmespath("$transfer_metadata", "transfer_metadata")
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$download_url", "download_url")
-                    .with_jmespath("$available", "available")
-                    .validate()
-                    .assert_equal("status_code", 200)
-                ),
-                Step(
-                    RunRequest("load Smash transfer files preview")
-                    .get("https://transfer.$transfer_region.fromsmash.co/transfer/$public_transfer_id/files/preview")
-                    .with_headers(**self_factory.headers, Authorization="Bearer $account_token")
-                    .with_params(version="01-2024", e=self_factory.identity_token)
-                    .teardown_hook(
-                        "${extract_files_metadata($response, $target)}",
-                        "files_metadata",
-                    )
-                    .teardown_hook("${extract_filename($files_metadata)}", "filename")
-                    .teardown_hook("${log_fetch_state($transfer_metadata, $files_metadata, $downloads_count)}")
-                    .extract()
-                    .with_jmespath("$files_metadata", "files_metadata")
-                    .with_jmespath("$filename", "filename")
-                    .validate()
-                    .assert_equal("status_code", 200)
-                    .assert_equal("$available", True)
-                ),
-            ]
-
-            fetch_steps = info_steps.copy()
-            fetch_steps.extend(
-                [
-                    OptionalStep(
-                        RunRequest("download")
-                        .get("$download_url")
-                        .with_headers(**self_factory.headers)
-                        .teardown_hook("${save_file($response, $filename)}")
+            def __init__(self):
+                super().__init__()
+                info_steps = [
+                    Step(
+                        RunRequest("discover Smash public service endpoint")
+                        .get("https://discovery.fromsmash.co/namespace/public/services")
+                        .headers(**self_factory.headers)
+                        .params(version="10-2019")
+                        .teardown_callback("extract_region(response)", assign="region")
                         .validate()
                         .assert_equal("status_code", 200)
-                    ).when(
-                        lambda step, vars: should_download(
-                            mode,
-                            # Only allow download when no notifications are configured.
-                            # notification_safe is True when no notification channels are enabled.
-                            1 if vars.get("transfer_metadata", {}).get("notification_safe", False) else None,
-                        )
-                    )
+                    ),
+                    Step(
+                        RunRequest("create anonymous Smash account")
+                        .post(lambda v: f"https://iam.{v['region']}.fromsmash.co/account")
+                        .headers(**self_factory.headers)
+                        .json({})
+                        .teardown_callback("extract_account_token(response)", assign="account_token")
+                        .validate()
+                        .assert_equal("status_code", 201)
+                    ),
+                    Step(
+                        RunRequest("resolve Smash transfer target")
+                        .get(f"https://link.fromsmash.co/target/{self_factory.encoded_target_id}")
+                        .headers(**self_factory.headers, Authorization="Bearer $account_token")
+                        .params(version="10-2019")
+                        .teardown_callback("extract_target(response)", assign="target")
+                        .teardown_callback("extract_transfer_region(target)", assign="transfer_region")
+                        .teardown_callback("extract_transfer_id(target)", assign="public_transfer_id")
+                        .validate()
+                        .assert_equal("status_code", 200)
+                    ),
+                    Step(
+                        RunRequest("load Smash transfer preview")
+                        .get(lambda v: f"https://transfer.{v['transfer_region']}.fromsmash.co/transfer/{v['public_transfer_id']}/preview")
+                        .headers(**self_factory.headers, Authorization="Bearer $account_token")
+                        .params(version="01-2024", e=self_factory.identity_token)
+                        .teardown_callback("extract_metadata(response, target)", assign="transfer_metadata")
+                        .teardown_callback("default_downloads_count()", assign="downloads_count")
+                        .teardown_callback("extract_download_url(transfer_metadata)", assign="download_url")
+                        .teardown_callback("is_available(transfer_metadata)", assign="available")
+                        .validate()
+                        .assert_equal("status_code", 200)
+                    ),
+                    Step(
+                        RunRequest("load Smash transfer files preview")
+                        .get(lambda v: f"https://transfer.{v['transfer_region']}.fromsmash.co/transfer/{v['public_transfer_id']}/files/preview")
+                        .headers(**self_factory.headers, Authorization="Bearer $account_token")
+                        .params(version="01-2024", e=self_factory.identity_token)
+                        .teardown_callback("extract_files_metadata(response, target)", assign="files_metadata")
+                        .teardown_callback("extract_filename(files_metadata)", assign="filename")
+                        .teardown_callback("log_fetch_state(transfer_metadata, files_metadata, downloads_count)")
+                        .validate()
+                        .assert_equal("status_code", 200)
+                        .assert_equal("available", True)
+                    ),
                 ]
-            )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+                fetch_steps = info_steps.copy()
+                fetch_steps.extend(
+                    [
+                        OptionalStep(
+                            Step(
+                                RunRequest("download")
+                                .get("$download_url")
+                                .headers(**self_factory.headers)
+                                .teardown_callback("save_file(response, filename)")
+                                .validate()
+                                .assert_equal("status_code", 200)
+                            )
+                        ).when(
+                            lambda step, vars: should_download(
+                                mode,
+                                # Only allow download when no notifications are configured.
+                                # notification_safe is True when no notification channels are enabled.
+                                1 if vars.get("transfer_metadata", {}).get("notification_safe", False) else None,
+                            )
+                        )
+                    ]
+                )
+
+                self.steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return SmashFetcher()

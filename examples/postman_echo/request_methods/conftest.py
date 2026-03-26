@@ -20,17 +20,17 @@ def publish_summary_artifact(file_name, payload):
 @pytest.fixture(scope="session", autouse=True)
 def session_fixture(request):
     """setup and teardown each task"""
-    total_testcases_num = request.node.testscollected
-    testcases = []
+    total_Workflows_num = request.node.testscollected
+    Workflows = []
     for item in request.node.items:
-        testcase = {
+        workflow = {
             "name": item.cls.config.name,
             "path": item.cls.config.path,
             "node_id": item.nodeid,
         }
-        testcases.append(testcase)
+        Workflows.append(workflow)
 
-    logger.debug(f"collected {total_testcases_num} testcases: {testcases}")
+    logger.debug(f"collected {total_Workflows_num} Workflows: {Workflows}")
 
     yield
 
@@ -39,40 +39,40 @@ def session_fixture(request):
     publish_summary_artifact(
         "task-summary.json",
         {
-            "total_testcases": total_testcases_num,
-            "testcases": testcases,
+            "total_Workflows": total_Workflows_num,
+            "Workflows": Workflows,
         },
     )
 
 
 @pytest.fixture(scope="function", autouse=True)
-def testcase_fixture(request):
-    """setup and teardown each testcase"""
+def workflow_fixture(request):
+    """setup and teardown each workflow"""
     config: Config = request.cls.config
-    teststeps: List[Step] = request.cls.teststeps
+    steps: List[Step] = request.cls.steps
 
-    logger.debug(f"setup testcase fixture: {config.name} - {request.module.__name__}")
+    logger.debug(f"setup workflow fixture: {config.name} - {request.module.__name__}")
 
     def update_request_headers(steps, index):
-        for teststep in steps:
-            if teststep.request:
+        for step in steps:
+            if step.request:
                 index += 1
-                teststep.request.headers["X-Request-ID"] = f"{prefix}-{index}"
-            elif teststep.testcase and hasattr(teststep.testcase, "teststeps"):
-                update_request_headers(teststep.testcase.teststeps, index)
+                step.request.headers["X-Request-ID"] = f"{prefix}-{index}"
+            elif step.workflow and hasattr(step.workflow, "steps"):
+                update_request_headers(step.workflow.steps, index)
 
-    # you can update testcase teststep like this
+    # you can update workflow steps like this
     prefix = f"HRUN-{uuid.uuid4()}"
-    update_request_headers(teststeps, 0)
+    update_request_headers(steps, 0)
 
     yield
 
     logger.debug(
-        f"teardown testcase fixture: {config.name} - {request.module.__name__}"
+        f"teardown workflow fixture: {config.name} - {request.module.__name__}"
     )
 
     summary = request.instance.get_summary()
-    logger.debug(f"testcase result summary: {summary}")
+    logger.debug(f"workflow result summary: {summary}")
 
     publish_summary_artifact(
         f"{request.node.name}-summary.json",

@@ -20,7 +20,20 @@ class SendAnywhereFetcherFactory:
     # Pattern to extract key from send-anywhere download paths
     KEY_PATTERN = re.compile(r"^/web/(?:downloads|s)/([A-Za-z0-9]+)")
 
+    @classmethod
+    def is_relevant_url(cls, url: str) -> bool:
+        parsed = urlparse(url)
+        if "send-anywhere.com" in parsed.netloc:
+            return bool(cls.KEY_PATTERN.search(parsed.path))
+        if parsed.netloc == "sendanywhe.re" and parsed.path not in {"", "/"}:
+            return True
+        if parsed.netloc == "mandrillapp.com" and "sendanywhe.re" in url:
+            return cls._extract_key_from_tracking(url) is not None
+        return False
+
     def __init__(self, link: str, headers: Dict[str, str] | None = None):
+        if not self.is_relevant_url(link):
+            raise ValueError("Error: No valid Send Anywhere URL provided")
         self.link = link
         self.headers = headers or {}
 
@@ -47,8 +60,6 @@ class SendAnywhereFetcherFactory:
                 self.key = key
                 self.resolved_url = f"https://send-anywhere.com/web/downloads/{self.key}"
                 return
-
-        raise ValueError("Error: No valid Send Anywhere URL provided")
 
     @staticmethod
     def _extract_key_from_tracking(link: str) -> str | None:
@@ -170,7 +181,7 @@ class SendAnywhereFetcherFactory:
                 Step(
                     RunRequest("register device")
                     .post("/web/device")
-                    .with_json(
+                    .json(
                         {
                             "os_type": "web",
                             "manufacturer": "Windows",
@@ -186,21 +197,14 @@ class SendAnywhereFetcherFactory:
                 Step(
                     RunRequest("get key data")
                     .get(f"/web/key/data/{key}")
-                    .with_params(includeFileList="true")
-                    .teardown_hook("${extract_key_data($response)}", "key_data")
-                    .teardown_hook("${extract_metadata($key_data)}", "metadata")
-                    .teardown_hook("${extract_downloads_count($key_data)}", "downloads_count")
-                    .teardown_hook("${is_relay_key($key_data)}", "is_relay")
-                    .teardown_hook("${extract_filename($key_data)}", "filename")
-                    .teardown_hook("${extract_file_uuids($key_data)}", "file_uuids")
-                    .teardown_hook("${log_fetch_state($metadata, $downloads_count)}")
-                    .extract()
-                    .with_jmespath("$key_data", "key_data")
-                    .with_jmespath("$metadata", "metadata")
-                    .with_jmespath("$downloads_count", "downloads_count")
-                    .with_jmespath("$is_relay", "is_relay")
-                    .with_jmespath("$filename", "filename")
-                    .with_jmespath("$file_uuids", "file_uuids")
+                    .params(includeFileList="true")
+                    .teardown_callback("extract_key_data(response)", assign="key_data")
+                    .teardown_callback("extract_metadata(key_data)", assign="metadata")
+                    .teardown_callback("extract_downloads_count(key_data)", assign="downloads_count")
+                    .teardown_callback("is_relay_key(key_data)", assign="is_relay")
+                    .teardown_callback("extract_filename(key_data)", assign="filename")
+                    .teardown_callback("extract_file_uuids(key_data)", assign="file_uuids")
+                    .teardown_callback("log_fetch_state(metadata, downloads_count)")
                     .validate()
                     .assert_equal("status_code", 200)
                 ),
@@ -213,10 +217,8 @@ class SendAnywhereFetcherFactory:
                     OptionalStep(
                         RunRequest("get download link")
                         .post(f"/web/key/search/{key}")
-                        .with_json({})
-                        .teardown_hook("${extract_weblink($response)}", "download_url")
-                        .extract()
-                        .with_jmespath("$download_url", "download_url")
+                        .json({})
+                        .teardown_callback("extract_weblink(response)", assign="download_url")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: vars.get("is_relay") is True),
@@ -224,10 +226,8 @@ class SendAnywhereFetcherFactory:
                     OptionalStep(
                         RunRequest("prepare download")
                         .post(f"/web/key/download/prepare/{key}")
-                        .with_json({"files": "$file_uuids"})
-                        .teardown_hook("${extract_s3_secret($response)}", "secret_key")
-                        .extract()
-                        .with_jmespath("$secret_key", "secret_key")
+                        .json(lambda v: {"files": v["file_uuids"]})
+                        .teardown_callback("extract_s3_secret(response)", assign="secret_key")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: vars.get("is_relay") is False),
@@ -235,10 +235,8 @@ class SendAnywhereFetcherFactory:
                     OptionalStep(
                         RunRequest("get download URL")
                         .post(f"/web/key/download/url/{key}")
-                        .with_json({"files": "$file_uuids", "secret_key": "$secret_key"})
-                        .teardown_hook("${extract_s3_download_url($response)}", "download_url")
-                        .extract()
-                        .with_jmespath("$download_url", "download_url")
+                        .json(lambda v: {"files": v["file_uuids"], "secret_key": v["secret_key"]})
+                        .teardown_callback("extract_s3_download_url(response)", assign="download_url")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: vars.get("is_relay") is False),
@@ -246,13 +244,13 @@ class SendAnywhereFetcherFactory:
                     OptionalStep(
                         RunRequest("download file")
                         .get("$download_url")
-                        .teardown_hook("${save_file($response, $filename)}")
+                        .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
                     ).when(lambda step, vars: vars.get("download_url") is not None),
                 ]
             )
 
-            teststeps = info_steps if mode == Mode.INFO else fetch_steps
+            steps = info_steps if mode == Mode.INFO else fetch_steps
 
         return SendAnyWhereFetcher()
