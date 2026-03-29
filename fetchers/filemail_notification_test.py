@@ -72,8 +72,8 @@ def _upload_to_filemail(
     )
     resp.raise_for_status()
     data = resp.json().get("data") or resp.json()
-    transfer_id = data.get("id") or data.get("transferid")
-    login_token = data.get("logintoken") or data.get("apikey")
+    transfer_id = data.get("id") if data.get("id") is not None else data.get("transferid")
+    login_token = data.get("logintoken") if data.get("logintoken") is not None else data.get("apikey")
     if not transfer_id:
         raise RuntimeError(f"Filemail transfer creation did not return an id: {resp.json()}")
 

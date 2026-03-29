@@ -67,8 +67,8 @@ def _upload_to_transfernow(
     )
     create_resp.raise_for_status()
     data = create_resp.json()
-    transfer_id = data.get("id") or data.get("transferId")
-    sender_secret = data.get("senderSecret") or data.get("sender_secret")
+    transfer_id = data.get("id") if data.get("id") is not None else data.get("transferId")
+    sender_secret = data.get("senderSecret") if data.get("senderSecret") is not None else data.get("sender_secret")
     if not transfer_id:
         raise RuntimeError(f"TransferNow create transfer did not return an id: {data}")
 

@@ -114,8 +114,8 @@ class TransferNowFetcherFactory:
                     },
                 )
 
-            def default_downloads_count(self) -> int | None:
-                return None
+            def default_downloads_count(self) -> int:
+                return 1
 
             def extract_next_data(self, response: ResponseObject) -> dict:
                 content = response.body.decode("utf-8")

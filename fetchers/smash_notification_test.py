@@ -71,7 +71,8 @@ def _smash_create_account(region: str, headers: dict) -> str:
     account = data.get("account") or data.get("identity")
     if account is None:
         account = data if "token" in data else {}
-    token = (account.get("token") or {}).get("token")
+    token_obj = account.get("token")
+    token = token_obj.get("token") if isinstance(token_obj, dict) else None
     if not token:
         raise RuntimeError(f"Smash account creation did not return a token: {data}")
     return token

@@ -25,11 +25,4 @@ def should_download(mode: Mode, downloads_count: int | None) -> bool:
         logger.critical("Skipping download because downloads_count is missing")
         return False
 
-    if downloads_count <= 0:
-        logger.critical(
-            "Skipping download because downloads_count is {}",
-            downloads_count,
-        )
-        return False
-
     return True

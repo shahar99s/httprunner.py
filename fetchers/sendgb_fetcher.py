@@ -59,8 +59,8 @@ class SendgbFetcherFactory:
                     },
                 )
 
-            def default_downloads_count(self) -> int | None:
-                return None
+            def default_downloads_count(self) -> int:
+                return 1
 
             def save_file_outer(self, response: ResponseObject):
                 disposition = response.headers.get("Content-Disposition", "")
@@ -90,13 +90,16 @@ class SendgbFetcherFactory:
                     r'<div class="fw-bold">Deletion Date</div>\s*([0-9]{2}\.[0-9]{2}\.[0-9]{4})',
                     response.text,
                 )
-                return match.group(1)
+                return match.group(1) if match else None
 
-            def extract_is_deleted(self, response: ResponseObject) -> str:
+            def extract_is_deleted(self, response: ResponseObject) -> bool:
                 deletion_date_str = self.extract_deletion_date(response)
+                if deletion_date_str is None:
+                    # No deletion date in the page — file is still available.
+                    return False
                 deletion_date = datetime.datetime.strptime(deletion_date_str, "%d.%m.%Y").date()
                 current_date = datetime.datetime.now().date()
-                return str(current_date > deletion_date)
+                return current_date > deletion_date
 
             def extract_metadata(self, response: ResponseObject) -> dict:
                 return {
