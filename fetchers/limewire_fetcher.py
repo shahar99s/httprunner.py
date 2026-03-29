@@ -20,7 +20,9 @@ class LimewireFetcherFactory:
     @classmethod
     def is_relevant_url(cls, url: str) -> bool:
         parsed = urlparse(url)
-        netloc = parsed.netloc.lstrip("www.")
+        # Use removeprefix, not lstrip: lstrip("www.") strips the individual characters
+        # {'w', '.'} from the left, incorrectly matching hosts like "wwwlimewire.com".
+        netloc = parsed.netloc.removeprefix("www.")
         return (netloc == "limewire.com" or netloc.endswith(".limewire.com")) and bool(
             cls.URL_PATTERN.search(url)
         )
@@ -95,11 +97,8 @@ class LimewireFetcherFactory:
             def extract_filename(self, metadata: dict) -> str:
                 return metadata.get("filename") or f"limewire-{content_id}"
 
-            def extract_file_url(self, metadata: dict) -> str:
-                file_url = metadata.get("file_url")
-                if not file_url:
-                    raise ValueError("Error: Limewire file download URL not found")
-                return file_url
+            def extract_file_url(self, metadata: dict) -> str | None:
+                return metadata.get("file_url")
 
             def is_available(self, metadata: dict) -> bool:
                 return metadata.get("state") == "available"
@@ -131,7 +130,12 @@ class LimewireFetcherFactory:
                         .teardown_callback("save_file(response, filename)")
                         .validate()
                         .assert_equal("status_code", 200)
-                    ).when(lambda step, vars: should_download(mode, vars.get("downloads_count")))
+                    ).when(
+                        lambda step, vars: (
+                            vars.get("available") is True
+                            and should_download(mode, vars.get("downloads_count"))
+                        )
+                    )
                 ]
             )
 
