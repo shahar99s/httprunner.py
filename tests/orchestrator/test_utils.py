@@ -52,7 +52,7 @@ class TestUtils(unittest.TestCase):
         functions_mapping["contained_by"]("3ab", "123abc456")
         functions_mapping["contained_by"](0, [0, 200])
 
-        functions_mapping["regex_match"]("123abc456", "^123\w+456$")
+        functions_mapping["regex_match"]("123abc456", r"^123\w+456$")
         with self.assertRaises(AssertionError):
             functions_mapping["regex_match"]("123abc456", "^12b.*456$")
 
@@ -87,13 +87,11 @@ class TestUtils(unittest.TestCase):
         self.assertIn("Accept", new_request_dict["headers"])
         self.assertIn("User-Agent", new_request_dict["headers"])
 
-        request_dict = "$default_request"
-        new_request_dict = utils.lower_dict_keys(request_dict)
-        self.assertEqual("$default_request", request_dict)
+        result = utils.lower_dict_keys("$default_request")
+        self.assertEqual(result, "$default_request")
 
-        request_dict = None
-        new_request_dict = utils.lower_dict_keys(request_dict)
-        self.assertEqual(None, request_dict)
+        result = utils.lower_dict_keys(None)
+        self.assertIsNone(result)
 
     def test_override_config_variables(self):
         step_variables = {"base_url": "$base_url", "foo1": "bar1"}

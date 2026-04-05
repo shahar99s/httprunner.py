@@ -71,9 +71,19 @@ class TestConfig(unittest.TestCase):
         self.assertIsNotNone(data.path)
         self.assertIn("test_config.py", data.path)
 
-    def test_struct_independent_copies(self):
+    def test_struct_reinitializes_variables_on_each_call(self):
+        # struct() always returns the same internal ConfigData object.
+        # Mutating its variables dict and then calling struct() again must restore
+        # the original values — both on the freshly-returned reference and on any
+        # previously-held reference (they are the same object).
         cfg = Config("test").variables(x="1")
         data1 = cfg.struct()
         data1.variables["x"] = "modified"
+
         data2 = cfg.struct()
+
+        # The re-initialized value is visible via both references because struct()
+        # re-creates the dict in-place on the single shared ConfigData object.
         self.assertEqual(data2.variables["x"], "1")
+        self.assertIs(data1, data2, "struct() should return the same ConfigData object each time")
+        self.assertEqual(data1.variables["x"], "1", "previously-held reference must also see the reset")
